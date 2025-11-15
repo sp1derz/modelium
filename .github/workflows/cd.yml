@@ -1,11 +1,22 @@
 name: CD
 
+# NOTE: Automatic builds disabled due to GitHub Actions disk space limits (~14GB)
+# Docker image with CUDA + PyTorch requires ~10GB, causing "no space left" errors
+# 
+# Manual deployment options:
+# 1. Trigger this workflow manually (workflow_dispatch)
+# 2. Build locally: docker build -t modelium:latest .
+# 3. Build on VM: See DEPLOYMENT.md for cloud deployment
+#
+# Re-enable automatic builds when GitHub Actions gets more disk space
+# or when we switch to external build runners
+
 on:
-  push:
-    branches: [ main ]
-    tags:
-      - 'v*'
-  workflow_dispatch:
+  # push:
+  #   branches: [ main ]
+  #   tags:
+  #     - 'v*'
+  workflow_dispatch:  # Manual trigger only
 
 env:
   REGISTRY: ghcr.io
