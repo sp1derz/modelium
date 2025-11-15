@@ -79,12 +79,43 @@ def serve(
         console.print("Press Ctrl+C to stop")
         console.print()
         
+        # Initialize services
+        console.print("🔧 Initializing services...")
+        from modelium.services.model_registry import ModelRegistry
+        from modelium.services.model_watcher import ModelWatcher
+        from modelium.services.vllm_service import VLLMService
+        from modelium.services.orchestrator import Orchestrator
+        
+        registry = ModelRegistry()
+        vllm_service = VLLMService(host=host, port=cfg.vllm.port)
+        
+        # Create orchestrator
+        orchestrator = Orchestrator(
+            brain=brain if cfg.modelium_brain.enabled else None,
+            vllm_service=vllm_service,
+            config=cfg,
+        )
+        
+        # Create model watcher
+        watcher = ModelWatcher(
+            watch_directories=cfg.orchestration.model_discovery.watch_directories,
+            scan_interval=cfg.orchestration.model_discovery.scan_interval_seconds,
+            supported_formats=cfg.orchestration.model_discovery.supported_formats,
+            on_model_discovered=orchestrator.on_model_discovered,
+        )
+        
         # Start FastAPI server
         import uvicorn
-        from fastapi import FastAPI
-        from fastapi.responses import JSONResponse
+        from fastapi import FastAPI, HTTPException
+        from pydantic import BaseModel
         
         app = FastAPI(title="Modelium API")
+        
+        class InferenceRequest(BaseModel):
+            prompt: str
+            organizationId: str
+            max_tokens: int = 100
+            temperature: float = 0.7
         
         @app.get("/")
         async def root():
@@ -94,6 +125,7 @@ def serve(
         async def status():
             import torch
             gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+            stats = registry.get_stats()
             return {
                 "status": "running",
                 "organization": cfg.organization.id,
@@ -101,16 +133,71 @@ def serve(
                 "gpu_enabled": cfg.gpu.enabled,
                 "brain_enabled": cfg.modelium_brain.enabled,
                 "orchestration_enabled": cfg.orchestration.enabled,
-                "models_loaded": 0,  # TODO: Track loaded models
-                "models_discovered": 0,  # TODO: Track discovered models
+                "models_loaded": stats["loaded"],
+                "models_discovered": stats["total_models"],
+                "models_loading": stats["loading"],
             }
+        
+        @app.get("/models")
+        async def list_models():
+            """List all models."""
+            models = registry.list_models()
+            return {
+                "models": [
+                    {
+                        "name": m.name,
+                        "status": m.status.value,
+                        "runtime": m.runtime,
+                        "gpu": m.target_gpu,
+                        "qps": m.qps,
+                        "idle_seconds": m.idle_seconds,
+                    }
+                    for m in models
+                ]
+            }
+        
+        @app.post("/predict/{model_name}")
+        async def predict(model_name: str, request: InferenceRequest):
+            """Run inference on a model."""
+            model = registry.get_model(model_name)
+            if not model:
+                raise HTTPException(status_code=404, detail="Model not found")
+            
+            if model.status != "loaded":
+                raise HTTPException(
+                    status_code=503, 
+                    detail=f"Model not loaded (status: {model.status})"
+                )
+            
+            # Record request
+            registry.record_request(model_name)
+            
+            # Run inference
+            result = vllm_service.inference(
+                model_name=model_name,
+                prompt=request.prompt,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+            )
+            
+            if "error" in result:
+                raise HTTPException(status_code=500, detail=result["error"])
+            
+            return result
         
         @app.get("/health")
         async def health():
             return {"status": "healthy"}
         
+        # Start background services
+        console.print("🚀 Starting background services...")
+        watcher.start()
+        if cfg.orchestration.enabled:
+            orchestrator.start()
+        
         # Run server
         console.print("[green]✅ Server ready![/green]")
+        console.print()
         uvicorn.run(app, host=host, port=port, log_level="info")
             
     except KeyboardInterrupt:
