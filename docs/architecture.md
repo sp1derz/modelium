@@ -2,311 +2,664 @@
 
 ## System Overview
 
-Modelium is designed as a distributed, event-driven system that automates the entire lifecycle of ML model deployment, from ingestion to production serving.
+Modelium is an **AI-orchestrated multi-model serving platform** that maximizes GPU utilization through intelligent, automated model lifecycle management. The system continuously monitors resource usage and dynamically loads/unloads models based on demand, ensuring optimal GPU utilization while maintaining low latency.
 
-## Core Components
+## Architecture Diagram
 
-### 1. Model Ingestion Service
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    User / External API                       │
+│         (Drop Models, HTTP Requests, Monitoring)             │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                  FastAPI Server (Port 8000)                  │
+│   Endpoints: /status /models /predict/<model> /health        │
+└─┬─────────────────────────────────────────────────────────┬─┘
+  │                                                           │
+  │  ┌────────────────────────────────────────────────────┐  │
+  │  │          Modelium Core Services Layer              │  │
+  │  │                                                    │  │
+  │  │  ┌──────────────────┐  ┌─────────────────────┐   │  │
+  │  │  │  Model Watcher   │  │  Model Registry     │   │  │
+  │  │  │  (Filesystem)    │──▶ (Singleton Store)   │   │  │
+  │  │  │  Scan: 30s       │  │  Thread-safe        │   │  │
+  │  │  └──────────────────┘  └─────────────────────┘   │  │
+  │  │           │                       │               │  │
+  │  │           └───────┐       ┌───────┘               │  │
+  │  │                   ▼       ▼                       │  │
+  │  │          ┌─────────────────────────┐              │  │
+  │  │          │   Orchestrator Service  │              │  │
+  │  │          │   - Every 10s loop      │              │  │
+  │  │          │   - Uses brain          │              │  │
+  │  │          │   - Load/unload         │              │  │
+  │  │          └──────────┬──────────────┘              │  │
+  │  │                     │                             │  │
+  │  └─────────────────────┼─────────────────────────────┘  │
+  │                        │                                 │
+  │  ┌─────────────────────▼─────────────────────────────┐  │
+  │  │      Modelium Brain (Qwen-2.5-1.8B)               │  │
+  │  │                                                    │  │
+  │  │  Task 1: Deployment Planning                      │  │
+  │  │   • Analyze model descriptor                      │  │
+  │  │   • Choose runtime (vLLM/Ray/TRT)                 │  │
+  │  │   • Select GPU                                    │  │
+  │  │                                                    │  │
+  │  │  Task 2: Orchestration (Every 10s)                │  │
+  │  │   • Gather metrics (QPS, latency, idle)           │  │
+  │  │   • Evaluate all models                           │  │
+  │  │   • Decide: keep/evict/load                       │  │
+  │  │                                                    │  │
+  │  │  Fallback: Rule-based if LLM unavailable          │  │
+  │  └────────────────────────────────────────────────────┘  │
+  │                        │                                 │
+  └────────────────────────┼─────────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────────┐
+│                  Runtime Execution Layer                     │
+│                                                              │
+│  ┌──────────────────┐  ┌─────────────────┐                 │
+│  │  vLLM Service    │  │  Ray Serve      │                 │
+│  │  • For LLMs      │  │  • General      │                 │
+│  │  • OpenAI API    │  │  • Custom API   │                 │
+│  │  • Dynamic       │  │  • Flexible     │                 │
+│  └────────┬─────────┘  └────────┬────────┘                 │
+│           │                     │                           │
+└───────────┼─────────────────────┼───────────────────────────┘
+            │                     │
+┌───────────▼─────────────────────▼───────────────────────────┐
+│                     GPU Resources                            │
+│    GPU 0     GPU 1     GPU 2     GPU 3    ...               │
+│   [Model A] [Model B]  [Idle]  [Loading]                    │
+│   80GB Used  45GB     0GB       30GB                         │
+└──────────────────────────────────────────────────────────────┘
+```
 
-**Responsibility**: Monitors input locations and triggers the analysis pipeline.
+## Core Services
 
-- **File Watching**: Monitors filesystem/S3 for new model artifacts
-- **Event Generation**: Creates ingestion events for the pipeline
-- **Artifact Storage**: Manages uploaded models in object storage
-- **Metadata Tracking**: Records ingestion metadata in database
+### 1. Model Watcher
 
-**Technologies**: FastAPI, Watchdog, Boto3, PostgreSQL
+**File**: `modelium/services/model_watcher.py`
 
-### 2. Model Analyzer (Core)
+**Purpose**: Monitors directories for new model files and triggers discovery
 
-**Responsibility**: Analyzes model artifacts and generates descriptors.
+**Implementation**:
+```python
+from watchdog.observers import Observer
 
-**Sub-components**:
-- **Framework Detector**: Identifies PyTorch, TensorFlow, ONNX, etc.
-- **Operation Extractor**: Analyzes model graph and operations
-- **Resource Estimator**: Calculates memory and compute requirements
-- **Security Scanner**: Detects malicious code and license issues
-- **Tokenizer Analyzer**: Extracts tokenizer configuration for NLP models
+class ModelWatcher:
+    def __init__(self, watch_dirs, registry, orchestrator):
+        self.watch_dirs = watch_dirs
+        self.registry = registry
+        self.orchestrator = orchestrator
+    
+    def on_created(self, event):
+        # New file detected
+        if event.src_path.endswith(('.pt', '.pth', '.onnx')):
+            model_name = extract_name(event.src_path)
+            
+            # Register
+            self.registry.register_model(
+                name=model_name,
+                path=event.src_path,
+                status=ModelStatus.DISCOVERED
+            )
+            
+            # Notify orchestrator
+            self.orchestrator.on_model_discovered(model_name, event.src_path)
+```
 
-**Output**: ModelDescriptor JSON with complete model specification
+**Configuration**:
+```yaml
+orchestration:
+  model_discovery:
+    watch_directories: ["/models/incoming"]
+    scan_interval_seconds: 30
+    supported_extensions: [".pt", ".pth", ".onnx", ".safetensors"]
+```
 
-### 3. Modelium LLM Service
+**Key Features**:
+- Background thread with watchdog
+- Supports multiple directories
+- File extension filtering
+- Debouncing for large files
 
-**Responsibility**: Generates optimal conversion plans from descriptors.
+### 2. Model Registry
 
-**Architecture**:
-- Fine-tuned Qwen-1.8B model trained on conversion examples
-- Prompt engineering with system and user templates
-- JSON output conforming to ConversionPlan schema
-- FastAPI inference server with GPU acceleration
+**File**: `modelium/services/model_registry.py`
 
-**Input**: ModelDescriptor + deployment requirements
-**Output**: ConversionPlan with steps, configs, and tests
+**Purpose**: Central source of truth for all models
 
-### 4. Plan Validator
+**Data Model**:
+```python
+class ModelStatus(str, Enum):
+    DISCOVERED = "discovered"
+    ANALYZING = "analyzing"
+    LOADING = "loading"
+    LOADED = "loaded"
+    UNLOADING = "unloading"
+    UNLOADED = "unloaded"
+    ERROR = "error"
 
-**Responsibility**: Validates conversion plans before execution.
+class ModelEntry(BaseModel):
+    name: str
+    path: str
+    status: ModelStatus
+    runtime: Optional[str]  # "vllm", "ray_serve"
+    gpu_id: Optional[int]
+    
+    # Metrics
+    qps: float = 0.0
+    avg_latency_ms: float = 0.0
+    last_request_time: Optional[float]
+    loaded_at: Optional[float]
+    unloaded_at: Optional[float]
+    
+    # Metadata
+    model_type: Optional[str]  # "llm", "vision", "text"
+    framework: Optional[str]  # "pytorch", "onnx"
+    size_gb: Optional[float]
+```
 
-**Checks**:
-- Schema conformance
-- Dangerous command detection (whitelist/blacklist)
-- Resource limit validation
-- Dependency graph validation
-- Script safety analysis
-
-### 5. Sandboxed Executor
-
-**Responsibility**: Executes conversion plans in isolated environments.
+**Key Methods**:
+```python
+class ModelRegistry:
+    _instance = None
+    
+    def register_model(name, path, status):
+        # Add to registry
+    
+    def update_model(name, **kwargs):
+        # Update attributes
+    
+    def get_model(name) -> ModelEntry:
+        # Thread-safe retrieval
+    
+    def get_all_models() -> List[ModelEntry]:
+        # All models
+    
+    def update_metrics(name, qps, latency):
+        # Called on each request
+```
 
 **Features**:
-- Docker-in-Docker execution
-- Network isolation (no external access)
-- Resource quotas (CPU, memory, GPU)
-- Timeout enforcement
-- Artifact collection
-- Comprehensive logging
+- Thread-safe singleton
+- In-memory (fast lookups)
+- Metrics tracking
+- Status lifecycle management
 
-**Isolation Layers**:
-1. Container isolation (Docker)
-2. Network policies (none mode)
-3. Filesystem isolation (bind mounts)
-4. Resource limits (cgroups)
+### 3. Modelium Brain
 
-### 6. Model Converters
+**File**: `modelium/brain/unified_brain.py`
 
-**Responsibility**: Implement specific conversion logic.
+**Purpose**: AI-powered decision making for both deployment planning and runtime orchestration
 
-**Components**:
-- **PyTorchConverter**: PyTorch → TorchScript/ONNX
-- **ONNXConverter**: ONNX optimization and validation
-- **TensorRTConverter**: ONNX → TensorRT engines
-- **QuantizationEngine**: FP16/INT8 quantization
-- **LLMConverter**: HuggingFace → TRT-LLM
+**Model**: Qwen-2.5-1.5B-Instruct (downloads from HuggingFace)
 
-### 7. Deployment Engine
+#### Task 1: Deployment Planning
 
-**Responsibility**: Deploys models to inference infrastructure.
+**Input**:
+```json
+{
+  "model_name": "my-llm",
+  "framework": "pytorch",
+  "model_type": "llm",
+  "size_gb": 14.5,
+  "parameters_millions": 7000,
+  "available_gpus": [
+    {"id": 0, "used_gb": 20, "total_gb": 80},
+    {"id": 1, "used_gb": 60, "total_gb": 80}
+  ]
+}
+```
 
-**Components**:
-- **TritonConfigGenerator**: Generates config.pbtxt
-- **ModelRepositoryManager**: Manages Triton model repository
-- **KServeManifestGenerator**: Creates InferenceService YAML
-- **DeploymentOrchestrator**: Applies Kubernetes resources
-- **HealthChecker**: Validates deployed models
+**Output**:
+```json
+{
+  "runtime": "vllm",
+  "gpu_id": 0,
+  "confidence": 0.92,
+  "reasoning": "LLM detected, vLLM optimal. GPU 0 has 60GB free."
+}
+```
 
-### 8. Monitoring & Observability
+#### Task 2: Orchestration Decisions
 
-**Responsibility**: Provides visibility into system operations.
+**Input** (every 10s):
+```json
+{
+  "models": [
+    {
+      "name": "qwen-7b",
+      "status": "loaded",
+      "gpu": 1,
+      "qps": 45.2,
+      "idle_seconds": 0
+    },
+    {
+      "name": "bert-base",
+      "status": "loaded",
+      "gpu": 2,
+      "qps": 0,
+      "idle_seconds": 320
+    }
+  ],
+  "gpu_state": {
+    "gpu_0": {"used": 0, "total": 80},
+    "gpu_1": {"used": 45, "total": 80},
+    "gpu_2": {"used": 12, "total": 80}
+  }
+}
+```
 
-**Stack**:
-- **Prometheus**: Metrics collection from all services
-- **Grafana**: Dashboards for visualization
-- **OpenTelemetry**: Distributed tracing
-- **Loki**: Log aggregation (optional)
+**Output**:
+```json
+{
+  "qwen-7b": {"action": "keep", "reason": "High traffic"},
+  "bert-base": {"action": "evict", "reason": "Idle >5min"}
+}
+```
 
-**Key Metrics**:
-- Model ingestion rate
-- Conversion success/failure rates
-- Conversion duration (p50, p95, p99)
-- Deployment success rate
-- Inference throughput and latency
-- GPU utilization
+#### Fallback Mode
+
+If brain fails to load or is disabled:
+```python
+# Rule-based fallback
+if model_type == "llm":
+    runtime = "vllm"
+elif model_type == "vision":
+    runtime = "ray_serve"
+else:
+    runtime = "ray_serve"
+
+# Always load on first request
+# Evict after 5 min idle
+```
+
+### 4. Orchestrator
+
+**File**: `modelium/services/orchestrator.py`
+
+**Purpose**: Execute brain decisions and manage model lifecycle
+
+**Main Loop**:
+```python
+class Orchestrator:
+    async def orchestration_loop(self):
+        while True:
+            # 1. Gather state
+            models = self.registry.get_all_models()
+            gpu_state = self._get_gpu_memory_state()
+            
+            # 2. Ask brain
+            if self.config.orchestration.mode == "intelligent":
+                decisions = self.brain.make_orchestration_decision(
+                    models=models,
+                    gpu_state=gpu_state,
+                    config=self.config.orchestration.policies
+                )
+            else:
+                decisions = self._rule_based_decisions(models)
+            
+            # 3. Execute
+            for model_name, decision in decisions.items():
+                if decision["action"] == "evict":
+                    await self._evict_model(model_name)
+                elif decision["action"] == "load":
+                    await self._load_model(model_name)
+            
+            # 4. Wait
+            await asyncio.sleep(
+                self.config.orchestration.decision_interval_seconds
+            )
+```
+
+**Actions**:
+- **keep**: Do nothing, model stays loaded
+- **evict**: Unload model, free GPU memory
+- **load**: Load model to selected GPU
+
+**GPU Memory Tracking**:
+```python
+def _get_gpu_memory_state(self) -> dict:
+    import torch
+    
+    gpu_state = {}
+    for i in range(torch.cuda.device_count()):
+        props = torch.cuda.get_device_properties(i)
+        total = props.total_memory / 1e9
+        reserved = torch.cuda.memory_reserved(i) / 1e9
+        
+        gpu_state[f"gpu_{i}"] = {
+            "used": reserved,
+            "total": total
+        }
+    return gpu_state
+```
+
+### 5. vLLM Service
+
+**File**: `modelium/services/vllm_service.py`
+
+**Purpose**: Manage vLLM instances for LLM serving
+
+**Methods**:
+
+**Load Model**:
+```python
+def load_model(self, model_path: str, gpu_id: int):
+    # Launch vLLM subprocess
+    cmd = [
+        "python", "-m", "vllm.entrypoints.openai.api_server",
+        "--model", model_path,
+        "--tensor-parallel-size", "1",
+        "--gpu-memory-utilization", "0.9",
+        "--port", str(8000 + gpu_id)
+    ]
+    
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    
+    process = subprocess.Popen(cmd, env=env)
+    
+    # Wait for health
+    await self._wait_for_health(port)
+    
+    # Store
+    self.processes[model_name] = {
+        "process": process,
+        "port": port,
+        "gpu": gpu_id
+    }
+```
+
+**Unload Model**:
+```python
+def unload_model(self, model_name: str):
+    if model_name in self.processes:
+        process = self.processes[model_name]["process"]
+        process.terminate()
+        process.wait(timeout=30)
+        del self.processes[model_name]
+```
+
+**Inference**:
+```python
+async def predict(self, model_name: str, prompt: str, params: dict):
+    port = self.processes[model_name]["port"]
+    
+    # OpenAI-compatible API
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"http://localhost:{port}/v1/completions",
+            json={"prompt": prompt, **params}
+        ) as resp:
+            return await resp.json()
+```
+
+**Current Implementation**: Subprocess-based (works, but not containerized)
+**TODO**: Docker containers for isolation and better resource management
+
+### 6. FastAPI Server
+
+**File**: `modelium/cli.py` (in `serve` command)
+
+**Endpoints**:
+
+```python
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+@app.get("/status")
+async def status():
+    return {
+        "status": "running",
+        "organization": config.organization.id,
+        "gpu_count": torch.cuda.device_count(),
+        "models_loaded": len([m for m in registry.get_all_models() if m.status == ModelStatus.LOADED]),
+        "models_discovered": len(registry.get_all_models()),
+    }
+
+@app.get("/models")
+async def list_models():
+    models = registry.get_all_models()
+    return {"models": [m.dict() for m in models]}
+
+@app.post("/predict/{model_name}")
+async def predict(model_name: str, request: dict):
+    model = registry.get_model(model_name)
+    
+    # Check status
+    if model.status != ModelStatus.LOADED:
+        # Trigger loading
+        orchestrator.on_model_discovered(model_name, model.path)
+        return {"status": "loading", "message": "Model is being loaded"}
+    
+    # Route to correct runtime
+    if model.runtime == "vllm":
+        result = await vllm_service.predict(model_name, request["prompt"], request)
+    elif model.runtime == "ray_serve":
+        result = await ray_service.predict(model_name, request)
+    
+    # Update metrics
+    registry.update_metrics(model_name, qps=..., latency=...)
+    
+    return result
+```
 
 ## Data Flow
 
+### Scenario 1: New Model Dropped
+
 ```
-┌─────────────────┐
-│  Model Artifact │
-│   (File/S3)     │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│    Ingestion    │  ◄──── File watcher
-│     Service     │
-└────────┬────────┘
-         │ Model path
-         ▼
-┌─────────────────┐
-│  Model Analyzer │  ◄──── Framework detection
-│   (Descriptor   │       Op extraction
-│   Generator)    │       Security scan
-└────────┬────────┘
-         │ ModelDescriptor
-         ▼
-┌─────────────────┐
-│   Meta-LLM      │  ◄──── Plan generation
-│   (Conversion   │       Optimization selection
-│    Planner)     │
-└────────┬────────┘
-         │ ConversionPlan
-         ▼
-┌─────────────────┐
-│ Plan Validator  │  ◄──── Safety checks
-│                 │       Resource validation
-└────────┬────────┘
-         │ Validated plan
-         ▼
-┌─────────────────┐
-│   Sandboxed     │  ◄──── Docker execution
-│   Executor      │       Artifact collection
-└────────┬────────┘
-         │ Converted model + configs
-         ▼
-┌─────────────────┐
-│   Deployment    │  ◄──── Triton config
-│    Engine       │       KServe manifest
-└────────┬────────┘
-         │ K8s resources
-         ▼
-┌─────────────────┐
-│ Triton/KServe   │  ◄──── Model serving
-│   Inference     │       Autoscaling
-└─────────────────┘
+1. User: cp model.pt /models/incoming/
+   ↓
+2. Watcher: Detects file, fires event
+   ↓
+3. Registry: Status = DISCOVERED
+   ↓
+4. Orchestrator: on_model_discovered()
+   ↓
+5. Analyzer: Extract metadata (framework, type, size)
+   ↓
+6. Registry: Status = ANALYZING
+   ↓
+7. Brain: Generate deployment plan (runtime + GPU)
+   ↓
+8. Registry: Status = LOADING
+   ↓
+9. vLLM Service: Load model to GPU
+   ↓
+10. Registry: Status = LOADED
+   ↓
+11. API: /predict/model available
 ```
 
-## Security Architecture
+### Scenario 2: Orchestration Loop (Every 10s)
 
-### 1. Sandbox Isolation
+```
+1. Orchestrator: Gather all models + metrics
+   ↓
+2. GPU Query: Get memory usage (CUDA)
+   ↓
+3. Brain: Analyze all models
+   - qwen-7b: 50 QPS → Keep
+   - bert: 0 QPS, idle 320s → Evict
+   ↓
+4. Execute: Unload bert from GPU 2
+   ↓
+5. Registry: bert.status = UNLOADED
+   ↓
+6. Wait 10 seconds, repeat
+```
 
-**Layers**:
-1. **Container Isolation**: Docker containers with minimal privileges
-2. **Network Isolation**: No outbound network access
-3. **Filesystem Isolation**: Read-only except workspace
-4. **Resource Limits**: CPU, memory, and GPU quotas
+### Scenario 3: Inference Request
 
-### 2. Code Safety
+```
+1. User: POST /predict/qwen-7b
+   ↓
+2. Registry: Check status
+   - If LOADED → Continue
+   - If UNLOADED → Trigger load
+   ↓
+3. vLLM Service: Forward to correct port
+   ↓
+4. vLLM: Generate response
+   ↓
+5. Track Metrics: QPS++, latency
+   ↓
+6. Return: Response to user
+```
 
-**Mechanisms**:
-- Command whitelist enforcement
-- Dangerous pattern detection (rm -rf, curl | bash, etc.)
-- Python script analysis (eval, exec, subprocess)
-- Binary file scanning
+## Configuration
 
-### 3. Secrets Management
+See `modelium.yaml` for full configuration. Key sections:
 
-**Approach**:
-- Kubernetes Secrets for credentials
-- No secrets in container images
-- Secret rotation support
-- Audit logging of secret access
+**Brain**:
+```yaml
+modelium_brain:
+  enabled: true
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  device: "cuda:0"
+  fallback_to_rules: true
+```
 
-### 4. Network Security
+**Orchestration**:
+```yaml
+orchestration:
+  enabled: true
+  mode: "intelligent"  # or "simple"
+  decision_interval_seconds: 10
+  
+  model_discovery:
+    watch_directories: ["/models/incoming"]
+    scan_interval_seconds: 30
+  
+  policies:
+    evict_after_idle_seconds: 300
+    evict_when_memory_above_percent: 85
+    always_loaded: []
+```
 
-**Policies**:
-- Service-to-service mTLS (Istio)
-- Network policies for ingress/egress
-- No direct internet access from executors
-- API authentication with JWT tokens
+**Runtimes**:
+```yaml
+vllm:
+  enabled: true
+  gpu_memory_utilization: 0.9
+  port: 8000
+
+ray_serve:
+  enabled: true
+  num_gpus_per_replica: 1.0
+  port: 8001
+```
+
+## Technology Stack
+
+**Core**:
+- Python 3.10+
+- FastAPI + Uvicorn (API server)
+- PyTorch (GPU management)
+- Pydantic (data validation)
+
+**AI**:
+- Transformers (brain model)
+- Qwen-2.5-1.8B (decision making)
+
+**Runtimes**:
+- vLLM (LLM serving)
+- Ray Serve (general models)
+- TensorRT (future)
+
+**Monitoring**:
+- watchdog (file system)
+- threading (background tasks)
+- asyncio (async I/O)
+
+## Performance Characteristics
+
+**Latency**:
+- Model discovery: <1s (watchdog event)
+- Analysis: 2-5s (depends on model size)
+- Brain decision: 0.5-1s (LLM inference)
+- vLLM loading: 30-120s (depends on model size)
+- Orchestration cycle: 10s interval
+
+**Throughput**:
+- vLLM: 50-200 QPS per model (continuous batching)
+- Brain: 1 decision per 10s (orchestration)
+- Registry: Thread-safe, handles concurrent updates
+
+**Resource Usage**:
+- Brain: 3-4GB GPU memory (Qwen-1.8B)
+- vLLM: 10-80GB per model (depends on size)
+- Python overhead: ~500MB RAM
+
+## Current Status
+
+**Production Ready**:
+- ✅ Model discovery & watching
+- ✅ Model registry (thread-safe)
+- ✅ Brain (LLM + fallback)
+- ✅ Orchestrator (10s loop)
+- ✅ vLLM service (subprocess)
+- ✅ Real GPU tracking
+- ✅ FastAPI endpoints
+
+**Work In Progress**:
+- ⏳ Prometheus metrics
+- ⏳ Docker containers
+- ⏳ Kubernetes manifests
+- ⏳ Request queueing
+- ⏳ Ray Serve integration
+- ⏳ Fine-tuned brain model
+
+See [STATUS.md](../STATUS.md) for detailed progress.
+
+## Security Considerations
+
+**Current**:
+- Sandboxed model analysis (safe loading)
+- Pickle detection in security scanner
+- No external network access during analysis
+
+**Future**:
+- Model signing & verification
+- Rate limiting per organization
+- API authentication
+- Network policies (K8s)
 
 ## Scalability
 
-### Horizontal Scaling
+**Current (Single Node)**:
+- 4-8 GPUs per machine
+- 10-50 models (with eviction)
+- 1000s of requests per second
 
-**Components**:
-- **Ingestion Service**: Stateless, scales with load
-- **Executor Service**: Scales based on queue depth
-- **Meta-LLM**: GPU-bound, limited by GPU availability
-- **Deployment Service**: Stateless, scales easily
+**Future (Multi-Node)**:
+- Kubernetes deployment
+- Multiple Modelium instances
+- Distributed orchestration
+- Cross-cluster routing
 
-### Resource Management
+## Monitoring & Observability
 
-**Strategies**:
-- Queue-based workload distribution (Redis)
-- Priority-based scheduling
-- GPU sharing with time-slicing
-- Spot instances for non-critical workloads
+**Current**:
+- Status endpoint (`/status`)
+- Models endpoint (`/models`)
+- Log files (`modelium.log`)
 
-### Storage
+**Planned**:
+- Prometheus metrics export
+- Grafana dashboards
+- Distributed tracing (OpenTelemetry)
+- Alert manager integration
 
-**Approach**:
-- S3-compatible object storage for models
-- PostgreSQL with replication for metadata
-- ReadWriteMany PVCs for shared workspaces
-- Artifact lifecycle management (retention policies)
+## References
 
-## High Availability
-
-### Service Redundancy
-
-- Multiple replicas for all services
-- Active-active deployment pattern
-- Health checks and automatic restart
-- Rolling updates with zero downtime
-
-### Data Durability
-
-- PostgreSQL streaming replication
-- S3 versioning and backup
-- Disaster recovery procedures
-- Point-in-time recovery capability
-
-### Failure Handling
-
-**Strategies**:
-- Automatic retry with exponential backoff
-- Circuit breakers for external services
-- Graceful degradation
-- Dead letter queues for failed jobs
-- Fallback plans in conversion logic
-
-## Performance Optimization
-
-### Caching
-
-- Model descriptor caching (Redis)
-- Compiled TensorRT engines (S3)
-- Frequently used base images (local registry)
-
-### Parallelization
-
-- Parallel model analysis
-- Concurrent conversion execution
-- Batch processing of small models
-
-### Resource Pooling
-
-- GPU sharing across conversions
-- Container image reuse
-- Persistent workspace volumes
-
-## Monitoring & Alerting
-
-### Key SLIs
-
-1. **Availability**: 99.9% uptime
-2. **Latency**: p95 < 30s for analysis, p95 < 10min for conversion
-3. **Throughput**: 100+ models/hour
-4. **Success Rate**: >95% successful conversions
-
-### Alerting Rules
-
-- Service down alerts (critical)
-- High error rate (warning after 5min)
-- Resource exhaustion (CPU/memory/GPU >90%)
-- Long-running conversions (>1hr)
-- Deployment failures
-
-## Technology Stack Summary
-
-| Component | Technologies |
-|-----------|-------------|
-| Application | Python 3.10, FastAPI, Pydantic |
-| ML Frameworks | PyTorch, ONNX, TensorRT, TRT-LLM |
-| Database | PostgreSQL, Redis |
-| Storage | MinIO (S3-compatible) |
-| Orchestration | Kubernetes, Helm, KServe |
-| Inference | Triton Inference Server |
-| Monitoring | Prometheus, Grafana, OpenTelemetry |
-| CI/CD | GitHub Actions |
-| Security | Docker isolation, Network policies |
-
-## Future Enhancements
-
-1. **Multi-cloud support**: AWS, GCP, Azure
-2. **Model versioning**: A/B testing, canary deployments
-3. **AutoML integration**: Hyperparameter optimization
-4. **Federated learning**: Distributed model training
-5. **Model marketplace**: Share and discover models
-6. **Advanced optimizations**: Pruning, distillation, NAS
-
+- [Getting Started](getting-started.md)
+- [The Brain](brain.md)
+- [Usage Guide](usage.md)
+- [Testing](../TESTING_TOMORROW.md)
+- [Status](../STATUS.md)

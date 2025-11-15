@@ -45,41 +45,93 @@ This creates `modelium.yaml` with default settings.
 
 ## Quick Test
 
-### 1. Start the Server
+### 1. Check Your System
 
 ```bash
-modelium serve --config modelium.yaml
+python -m modelium.cli check --verbose
+```
+
+Should show all green checkmarks:
+```
+✅ Python 3.11.x
+✅ PyTorch: 2.x
+✅ FastAPI: 0.104.x
+✅ CUDA available: 4 GPU(s)
+✅ vLLM: 0.x.x
+✅ Config found: modelium.yaml
+```
+
+### 2. Start the Server
+
+```bash
+python -m modelium.cli serve --config modelium.yaml
 ```
 
 You should see:
 ```
-🧠 Modelium Brain loading...
-✅ Brain loaded (rule-based mode)
-👁️  Watching /models/incoming for new models
-🚀 Server running on http://0.0.0.0:8000
+🧠 Starting Modelium Server...
+📝 Loading configuration...
+   Organization: my-company
+   GPUs: 4
+🧠 Loading Modelium Brain...
+   ✅ Brain loaded successfully
+🔧 Initializing services...
+🚀 Starting background services...
+✅ Server ready!
+INFO:     Uvicorn running on http://0.0.0.0:8000
 ```
 
-### 2. Drop a Model
+### 3. Check Status
 
-Copy any PyTorch model to the watched directory:
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# System status
+curl http://localhost:8000/status | jq .
+
+# List models (initially empty)
+curl http://localhost:8000/models | jq .
+```
+
+### 4. Drop a Model
+
+Copy any model to the watched directory:
 
 ```bash
 cp your_model.pt /models/incoming/
 ```
 
-Modelium will automatically:
-- Detect the model
-- Analyze it
-- Choose the best runtime
-- Deploy it
-- Make it available via API
+Watch the logs:
+```bash
+# In another terminal
+tail -f modelium.log
 
-### 3. Make a Request
+# You'll see:
+📁 Discovered model: your_model
+🔍 Analyzing your_model...
+   Framework: pytorch
+   ✅ Analysis complete
+📋 Planning deployment for your_model...
+   Plan: vllm on GPU 2
+🔼 Loading your_model to GPU 2...
+   ✅ your_model loaded
+```
+
+### 5. Make Requests
 
 ```bash
+# Check model status
+curl http://localhost:8000/models | jq '.models[] | {name, status, runtime, gpu}'
+
+# Run inference
 curl -X POST http://localhost:8000/predict/your_model \
   -H "Content-Type: application/json" \
-  -d '{"input": "test", "organizationId": "test-org"}'
+  -d '{
+    "prompt": "Hello, world!",
+    "organizationId": "test-org",
+    "max_tokens": 50
+  }'
 ```
 
 ## What's Next?
@@ -95,10 +147,22 @@ curl -X POST http://localhost:8000/predict/your_model \
 **Fix**: Use `python -m modelium.cli serve` instead
 
 **Issue**: Models not detected  
-**Fix**: Check `watch_directories` in `modelium.yaml`
+**Fix**: 
+1. Check `watch_directories` in `modelium.yaml`
+2. Verify directory exists: `ls -la /models/incoming/`
+3. Check logs: `tail -f modelium.log`
 
 **Issue**: GPU not found  
-**Fix**: Set `gpu.enabled: false` for CPU-only mode
+**Fix**: Set `gpu.enabled: false` for CPU-only mode (slower)
 
-For more help, see [Testing Guide](testing.md).
+**Issue**: vLLM fails to load  
+**Fix**: Lower GPU memory: `vllm.gpu_memory_utilization: 0.7` in config
+
+**Issue**: Brain fails to load  
+**Expected**: System falls back to rule-based mode automatically
+
+**Issue**: Port already in use  
+**Fix**: `pkill -f "modelium.cli serve"` or change port
+
+For detailed troubleshooting, see [Testing Guide](../TESTING_TOMORROW.md).
 
