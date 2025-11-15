@@ -1,7 +1,7 @@
 """
-Forge CLI tool.
+Modelium CLI tool.
 
-Command-line interface for interacting with Forge.
+Command-line interface for Modelium.
 """
 
 import typer
@@ -12,9 +12,129 @@ from rich.progress import Progress
 from pathlib import Path
 from typing import Optional
 import time
+import sys
 
-app = typer.Typer(help="Forge - ML Model Deployment Pipeline")
+app = typer.Typer(help="Modelium - AI-Powered Model Serving Platform")
 console = Console()
+
+
+@app.command()
+def serve(
+    config: Path = typer.Option("modelium.yaml", help="Path to config file"),
+    host: str = typer.Option("0.0.0.0", help="Host to bind to"),
+    port: int = typer.Option(8000, help="Port to bind to"),
+):
+    """Start the Modelium server."""
+    
+    if not config.exists():
+        console.print(f"[red]Error: Config file not found: {config}[/red]")
+        console.print(f"Run 'modelium init' to create a default config")
+        raise typer.Exit(1)
+    
+    console.print("[bold green]🧠 Starting Modelium Server...[/bold green]")
+    console.print(f"Config: {config}")
+    console.print(f"Host: {host}")
+    console.print(f"Port: {port}")
+    console.print()
+    
+    try:
+        # Import here to avoid loading heavy deps at CLI startup
+        from modelium.config import load_config
+        from modelium.brain import ModeliumBrain
+        
+        # Load config
+        console.print("📝 Loading configuration...")
+        cfg = load_config(config)
+        console.print(f"   Organization: {cfg.organization.id}")
+        console.print(f"   GPUs: {cfg.gpu.count or 'auto-detect'}")
+        console.print()
+        
+        # Initialize brain if enabled
+        if cfg.modelium_brain.enabled:
+            console.print("🧠 Loading Modelium Brain...")
+            try:
+                brain = ModeliumBrain(
+                    model_name=cfg.modelium_brain.model_name,
+                    device=cfg.modelium_brain.device,
+                    dtype=cfg.modelium_brain.dtype,
+                    fallback_to_rules=cfg.modelium_brain.fallback_to_rules,
+                )
+                console.print("   ✅ Brain loaded successfully")
+            except Exception as e:
+                if cfg.modelium_brain.fallback_to_rules:
+                    console.print(f"   ⚠️  Brain load failed: {e}")
+                    console.print("   ✅ Using rule-based mode (fallback)")
+                else:
+                    console.print(f"   ❌ Brain load failed: {e}")
+                    raise typer.Exit(1)
+        else:
+            console.print("📊 Brain disabled, using rule-based mode")
+        
+        console.print()
+        console.print("🚀 Server starting...")
+        console.print(f"   API: http://{host}:{port}")
+        console.print(f"   Metrics: http://{host}:9090/metrics")
+        console.print()
+        console.print("Press Ctrl+C to stop")
+        console.print()
+        
+        # TODO: Start actual server (FastAPI/uvicorn)
+        # For now, just keep process alive for testing
+        console.print("[yellow]⚠️  Note: Full server implementation in progress[/yellow]")
+        console.print("[yellow]   Currently in test mode - server placeholder[/yellow]")
+        console.print()
+        
+        import signal
+        import time
+        
+        def signal_handler(sig, frame):
+            console.print("\n[yellow]Shutting down...[/yellow]")
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+        while True:
+            time.sleep(1)
+            
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Shutting down...[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def init(
+    output: Path = typer.Option("modelium.yaml", help="Output config file"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing file"),
+):
+    """Initialize a new Modelium configuration file."""
+    
+    if output.exists() and not force:
+        console.print(f"[yellow]Config file already exists: {output}[/yellow]")
+        console.print(f"Use --force to overwrite")
+        raise typer.Exit(1)
+    
+    console.print(f"Creating {output}...")
+    
+    # Copy default config
+    import shutil
+    from pathlib import Path
+    
+    # Get package directory
+    pkg_dir = Path(__file__).parent.parent
+    default_config = pkg_dir / "modelium.yaml"
+    
+    if default_config.exists():
+        shutil.copy(default_config, output)
+        console.print(f"[green]✓ Created {output}[/green]")
+        console.print(f"\nNext steps:")
+        console.print(f"1. Edit {output} with your settings")
+        console.print(f"2. Run: modelium serve")
+    else:
+        console.print(f"[red]Error: Default config not found[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
