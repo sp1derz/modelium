@@ -1,5 +1,8 @@
 # Docker Quick Start
 
+> **Note**: The Docker image is ~8-10GB due to CUDA runtime + PyTorch + vLLM dependencies. 
+> This is normal for GPU-accelerated ML workloads. Build time: 10-15 minutes.
+
 ## Build and Run Locally
 
 ```bash
@@ -162,19 +165,41 @@ docker pull ghcr.io/sp1derz/modelium:latest
 docker run --gpus all -p 8000:8000 ghcr.io/sp1derz/modelium:latest
 ```
 
-## Multi-Stage Build (Future Optimization)
+## Image Size Optimization
 
-Current Dockerfile is single-stage. For smaller images:
+Current image: ~8-10GB (CUDA runtime + PyTorch + ML dependencies)
+
+**Already optimized**:
+- ✅ Clears Poetry cache after install
+- ✅ Removes pip cache
+- ✅ Deletes __pycache__ and .pyc files
+- ✅ Uses runtime-only CUDA image (not devel)
+
+**Why so large?**
+```
+CUDA runtime:         ~2GB
+PyTorch + dependencies: ~4GB
+vLLM dependencies:     ~2GB
+Modelium code:         ~100MB
+Total:                ~8-10GB
+```
+
+**Can't reduce much more** without losing functionality. CPU-only would be ~2GB but defeats the purpose.
+
+## Multi-Stage Build (Future)
+
+For even smaller images, could use multi-stage:
 
 ```dockerfile
 FROM base AS builder
-# Install build dependencies
 RUN poetry install
 
-FROM base AS runtime
-# Copy only runtime files
+FROM base AS runtime  
 COPY --from=builder /usr/local/lib/python3.11 /usr/local/lib/python3.11
+# Saves ~500MB
 ```
+
+Trade-off: More complex, harder to debug.
 
 ## CI/CD Integration
 

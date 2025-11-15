@@ -54,8 +54,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min  # Use 'min' instead of 'max' to save space
           platforms: linux/amd64
+          # Increase build timeout
+          build-args: |
+            BUILDKIT_STEP_LOG_MAX_SIZE=50000000
 
   deploy-staging:
     name: Deploy to Staging
