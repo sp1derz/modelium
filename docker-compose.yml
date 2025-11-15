@@ -1,0 +1,229 @@
+version: '3.9'
+
+services:
+  # PostgreSQL database for metadata storage
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: modelium
+      POSTGRES_USER: modelium
+      POSTGRES_PASSWORD: modelium_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U modelium"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO for S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: modelium
+      MINIO_ROOT_PASSWORD: modelium_minio_password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Redis for caching and job queue
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: modelium
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  # Modelium LLM inference server
+  modelium-llm:
+    build:
+      context: .
+      dockerfile: modelium_llm/server/Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      MODEL_PATH: /models/modelium-llm
+      MAX_BATCH_SIZE: 8
+      CUDA_VISIBLE_DEVICES: "0"
+    volumes:
+      - ./models/modelium-llm:/models/modelium-llm:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Core ingestion service
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://modelium:modelium_dev_password@postgres:5432/modelium
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: modelium
+      MINIO_SECRET_KEY: modelium_minio_password
+      REDIS_URL: redis://redis:6379/0
+      MODELIUM_LLM_URL: http://modelium-llm:8000
+      WATCH_PATH: /modelium/models/incoming
+    volumes:
+      - ./models/incoming:/modelium/models/incoming
+      - ./models/processed:/modelium/models/processed
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      modelium-llm:
+        condition: service_started
+
+  # Executor service for sandboxed conversion
+  executor-service:
+    build:
+      context: .
+      dockerfile: executor/Dockerfile
+    ports:
+      - "8003:8000"
+    privileged: true  # Required for Docker-in-Docker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://modelium:modelium_dev_password@postgres:5432/modelium
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: modelium
+      MINIO_SECRET_KEY: modelium_minio_password
+      SANDBOX_TYPE: docker
+      EXECUTION_TIMEOUT: 3600
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - executor_workspace:/workspace
+    depends_on:
+      - postgres
+      - minio
+
+  # Deployment service
+  deployment-service:
+    build:
+      context: .
+      dockerfile: runtimes/Dockerfile
+    ports:
+      - "8004:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://modelium:modelium_dev_password@postgres:5432/modelium
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: modelium
+      MINIO_SECRET_KEY: modelium_minio_password
+      TRITON_ENDPOINT: triton:8000
+      KSERVE_NAMESPACE: modelium-inference
+    volumes:
+      - ./models/repository:/models/repository
+    depends_on:
+      - postgres
+      - minio
+
+  # Frontend API
+  frontend-api:
+    build:
+      context: .
+      dockerfile: frontend/api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://modelium:modelium_dev_password@postgres:5432/modelium
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3001
+      SECRET_KEY: modelium_dev_secret_key_change_in_production
+    depends_on:
+      - postgres
+      - ingestion-service
+      - executor-service
+      - deployment-service
+
+  # Frontend web UI
+  frontend-web:
+    build:
+      context: frontend/web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - frontend-api
+
+  # Triton Inference Server (for local testing)
+  triton:
+    image: nvcr.io/nvidia/tritonserver:23.10-py3
+    ports:
+      - "8005:8000"
+      - "8006:8001"
+      - "8007:8002"
+    volumes:
+      - ./models/repository:/models
+    command: tritonserver --model-repository=/models --strict-model-config=false
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  postgres_data:
+  minio_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  executor_workspace:
+
+networks:
+  default:
+    name: modelium-network
+

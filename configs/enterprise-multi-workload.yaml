@@ -1,0 +1,129 @@
+# Modelium Config: Enterprise Multi-Workload
+# Perfect for: Large companies with diverse model types
+# This config is for the MAIN control plane that routes to specialized instances
+
+organization:
+  id: "enterprise-corp"
+  name: "Enterprise Corporation"
+  enable_usage_tracking: true
+
+runtime:
+  default: "auto"  # Let Modelium decide
+  overrides:
+    llm: "vllm"
+    vision: "ray_serve"
+    text: "ray_serve"
+
+gpu:
+  enabled: true
+
+# Workload separation: Route different workloads to different instances
+# Each instance runs on a separate VM/node
+workload_separation:
+  enabled: true
+  
+  instances:
+    # LLM Instance (runs on gpu-llm-01.company.com with 8 A100s)
+    llm_instance:
+      description: "8x A100 GPUs for LLM serving"
+      model_types: ["llm", "language_model", "causal_lm"]
+      runtime: "vllm"
+      gpu_count: 8
+      port_offset: 0  # Ports: 8000 (vLLM)
+    
+    # Vision Instance (runs on gpu-vision-01.company.com with 4 A100s)
+    vision_instance:
+      description: "4x A100 GPUs for vision models"
+      model_types: ["vision", "image", "video"]
+      runtime: "ray_serve"
+      gpu_count: 4
+      port_offset: 100  # Ports: 8101 (Ray)
+    
+    # Text/NLP Instance (runs on gpu-text-01.company.com with 2 A100s)
+    text_instance:
+      description: "2x A100 GPUs for BERT, embeddings, etc."
+      model_types: ["text", "nlp", "embedding"]
+      runtime: "ray_serve"
+      gpu_count: 2
+      port_offset: 200  # Ports: 8201 (Ray)
+    
+    # Audio Instance (runs on gpu-audio-01.company.com with 2 A100s)
+    audio_instance:
+      description: "2x A100 GPUs for Whisper, audio models"
+      model_types: ["audio", "speech"]
+      runtime: "ray_serve"
+      gpu_count: 2
+      port_offset: 300  # Ports: 8301 (Ray)
+
+# S3 storage shared across all instances
+storage:
+  backend: "s3"
+  s3:
+    bucket: "enterprise-models"
+    region: "us-east-1"
+
+# Enterprise-grade monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    port: 9090
+  grafana:
+    enabled: true
+    port: 3000
+  logging:
+    level: "INFO"
+    format: "json"
+
+# Security (strict for enterprise)
+security:
+  enable_sandbox: true
+  enable_model_scanning: true
+  allowed_model_sources:
+    - "huggingface.co"
+    - "s3://enterprise-approved-models"
+  block_external_network: true
+
+# Usage tracking & billing
+usage_tracking:
+  enabled: true
+  track_inference_calls: true
+  track_conversion_time: true
+  track_gpu_hours: true
+  track_storage_bytes: true
+  export_to: "prometheus"
+  retention_days: 365
+
+# Rate limiting with per-customer tiers
+rate_limiting:
+  enabled: true
+  per_organization:
+    enabled: true
+    default_rpm: 1000
+    overrides:
+      # Tier 1: Basic customers
+      "customer-tier1-001": 5000
+      "customer-tier1-002": 5000
+      # Tier 2: Premium customers
+      "customer-tier2-001": 50000
+      "customer-tier2-002": 50000
+      # Tier 3: Enterprise customers
+      "customer-tier3-001": 500000
+      "customer-tier3-002": 500000
+
+# API with authentication
+api:
+  enable_cors: true
+  cors_origins:
+    - "https://app.enterprise.com"
+    - "https://dashboard.enterprise.com"
+  enable_authentication: true
+  auth_type: "jwt"
+  require_organization_id: true
+
+# All experimental features enabled for enterprise
+experimental:
+  enable_model_caching: true
+  enable_batching_optimization: true
+  enable_quantization_auto_tuning: true
+

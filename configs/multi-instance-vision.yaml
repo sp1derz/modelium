@@ -1,0 +1,50 @@
+# Modelium Config: Multi-Instance (Vision Models)
+# Perfect for: Image processing, computer vision workloads
+# Deploy this on a separate server with 2 GPUs
+
+organization:
+  id: "vision-company"
+  name: "Vision Company Inc"
+  enable_usage_tracking: true
+
+# Use Ray Serve for vision models (better for high-throughput inference)
+runtime:
+  default: "auto"
+  overrides:
+    vision: "ray_serve"
+    image: "ray_serve"
+
+gpu:
+  enabled: true
+  count: 2
+
+ray_serve:
+  enabled: true
+  num_gpus_per_replica: 1.0
+  autoscaling:
+    enabled: true
+    min_replicas: 2
+    max_replicas: 20  # Scale up heavily for vision workloads
+    target_num_ongoing_requests_per_replica: 10
+  port: 8001
+
+# Workload separation: Dedicated for vision only
+workload_separation:
+  enabled: true
+  instances:
+    vision_instance:
+      description: "Dedicated vision model serving"
+      model_types: ["vision", "image", "video"]
+      runtime: "ray_serve"
+      gpu_count: 2
+      port_offset: 0
+
+storage:
+  models_dir: "/models/vision/incoming"
+  backend: "local"
+
+monitoring:
+  enabled: true
+  logging:
+    level: "INFO"
+

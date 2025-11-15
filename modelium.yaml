@@ -1,0 +1,327 @@
+# Modelium Configuration
+# This is the main config file for your Modelium deployment
+
+# Organization Settings (Multi-tenancy)
+organization:
+  id: "my-company"  # Used for tracking usage per org
+  name: "My Company"
+  enable_usage_tracking: true
+
+# Runtime Preferences
+# Options: "auto", "vllm", "ray_serve", "tensorrt", "triton"
+# "auto" = Let Modelium choose the best runtime based on model type
+runtime:
+  default: "auto"  # Default for all models
+  
+  # Override by model type
+  overrides:
+    llm: "vllm"              # Force LLMs to use vLLM
+    vision: "ray_serve"       # Vision models use Ray
+    text: "ray_serve"         # Text models (BERT, etc.) use Ray
+    # audio: "ray_serve"
+    # multimodal: "ray_serve"
+
+# GPU Configuration
+gpu:
+  enabled: true
+  # Auto-detect available GPUs, or set manually
+  count: null  # null = auto-detect, or set to specific number
+  type: "nvidia-a100"  # For logging/monitoring
+  memory_fraction: 0.9  # How much GPU memory to use (0.0-1.0)
+
+# vLLM Settings (for LLMs)
+vllm:
+  enabled: true
+  tensor_parallel_size: null  # null = auto-detect based on available GPUs
+  dtype: "auto"  # auto, float16, bfloat16, float32
+  max_model_len: null  # null = use model default
+  gpu_memory_utilization: 0.9
+  quantization: null  # null, "awq", "gptq", "squeezellm"
+  enable_lora: false
+  max_loras: 1
+  trust_remote_code: true
+  port: 8000
+  host: "0.0.0.0"
+
+# Ray Serve Settings (for general models)
+ray_serve:
+  enabled: true
+  num_cpus_per_replica: 2.0
+  num_gpus_per_replica: 1.0  # 0.0 for CPU-only
+  max_concurrent_queries: 100
+  autoscaling:
+    enabled: true
+    min_replicas: 1
+    max_replicas: 10
+    target_num_ongoing_requests_per_replica: 5
+  port: 8001
+  host: "0.0.0.0"
+
+# TensorRT Settings (for max performance)
+tensorrt:
+  enabled: true
+  use_fp16: true
+  use_int8: false
+  workspace_size_gb: 4
+  max_batch_size: 32
+  dynamic_shapes: true
+
+# Triton Inference Server Settings
+triton:
+  enabled: true
+  port: 8002
+  grpc_port: 8003
+  http_port: 8002
+  metrics_port: 8004
+  model_repository: "/models"
+  strict_model_config: false
+  dynamic_batching:
+    enabled: true
+    max_queue_delay_microseconds: 100
+    preferred_batch_sizes: [1, 2, 4, 8, 16, 32]
+
+# Model Conversion Settings
+conversion:
+  timeout_seconds: 3600  # 1 hour max
+  max_retries: 3
+  enable_validation: true  # Run smoke tests after conversion
+  save_intermediate_artifacts: true
+  cleanup_on_success: false  # Keep all artifacts
+  cleanup_on_failure: true
+
+# Deployment Settings
+deployment:
+  environment: "production"  # development, staging, production
+  namespace: "modelium"
+  auto_deploy: true  # Auto-deploy after successful conversion
+  health_check_timeout: 300  # seconds
+  
+  # Resource limits (per model replica)
+  resources:
+    requests:
+      cpu: "2"
+      memory: "8Gi"
+      gpu: "1"
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+      gpu: "1"
+
+# Storage Settings
+storage:
+  models_dir: "/models/incoming"  # Watch this directory for new models
+  artifacts_dir: "/models/artifacts"  # Store converted models
+  logs_dir: "/models/logs"
+  backend: "local"  # local, s3, gcs, azure
+  
+  # S3 settings (if backend = "s3")
+  s3:
+    bucket: "modelium-models"
+    region: "us-west-2"
+    endpoint: null  # null for AWS, or custom endpoint
+  
+  # GCS settings (if backend = "gcs")
+  gcs:
+    bucket: "modelium-models"
+    project_id: "my-project"
+  
+  # Azure settings (if backend = "azure")
+  azure:
+    container: "modelium-models"
+    account_name: "myaccount"
+
+# Monitoring & Observability
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    port: 9090
+  grafana:
+    enabled: true
+    port: 3000
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+    format: "json"  # json, text
+    
+# Security
+security:
+  enable_sandbox: true  # Run conversions in isolated containers
+  enable_model_scanning: true  # Scan for malicious code
+  allowed_model_sources:
+    - "huggingface.co"
+    - "local"
+  block_external_network: true  # Block network during conversion
+
+# Advanced: Workload Separation (for high-traffic deployments)
+# This allows you to run separate Modelium instances for different workloads
+workload_separation:
+  enabled: false  # Set to true for multi-instance setup
+  
+  # Define separate instances
+  instances:
+    llm_instance:
+      description: "Dedicated instance for LLMs"
+      model_types: ["llm"]
+      runtime: "vllm"
+      gpu_count: 4  # This instance gets 4 GPUs
+      port_offset: 0  # vllm at 8000, ray at 8001, etc.
+      
+    vision_instance:
+      description: "Dedicated instance for vision models"
+      model_types: ["vision", "image"]
+      runtime: "ray_serve"
+      gpu_count: 2
+      port_offset: 100  # vllm at 8100, ray at 8101, etc.
+    
+    text_instance:
+      description: "Dedicated instance for text models (BERT, etc.)"
+      model_types: ["text", "nlp"]
+      runtime: "ray_serve"
+      gpu_count: 1
+      port_offset: 200  # vllm at 8200, ray at 8201, etc.
+
+# Rate Limiting (per organization)
+rate_limiting:
+  enabled: true
+  requests_per_minute: 1000
+  requests_per_day: 100000
+  # Per-organization limits
+  per_organization:
+    enabled: true
+    default_rpm: 1000
+    # Custom limits per org
+    overrides:
+      "premium-org-123": 10000
+      "enterprise-org-456": 50000
+
+# Billing & Usage Tracking (for multi-tenant SaaS)
+usage_tracking:
+  enabled: true
+  track_inference_calls: true
+  track_conversion_time: true
+  track_gpu_hours: true
+  track_storage_bytes: true
+  export_to: "prometheus"  # prometheus, s3, database
+  retention_days: 90
+
+# API Settings
+api:
+  enable_cors: true
+  cors_origins: ["*"]  # Or specific domains: ["https://app.example.com"]
+  enable_authentication: false
+  auth_type: "jwt"  # jwt, api_key, oauth
+  require_organization_id: true  # Force organizationId in all requests
+
+# Experimental Features
+experimental:
+  enable_model_caching: true  # Cache frequently used models
+  enable_batching_optimization: true
+  enable_quantization_auto_tuning: false
+
+# ============================================================================
+# 🧠 INTELLIGENT ORCHESTRATION - The "Brain" of Modelium
+# ============================================================================
+
+# Modelium Brain: Single LLM that does EVERYTHING
+# - Task 1: Analyzes models and generates conversion plans
+# - Task 2: Makes orchestration decisions (load/unload, GPU packing)
+# - Model: Fine-tuned Qwen-2.5-1.8B (tiny, runs on 1 GPU)
+modelium_brain:
+  enabled: true
+  
+  # Model location (downloads from HuggingFace automatically)
+  model_name: "modelium/brain-v1"  # Will be published to HF
+  device: "cuda:0"  # Runs on GPU 0 (only ~2GB VRAM)
+  dtype: "float16"
+  
+  # Inference settings
+  max_new_tokens: 2048
+  temperature: 0.3  # Lower = more deterministic
+  timeout_seconds: 5
+  
+  # Fallback if LLM unavailable
+  fallback_to_rules: true  # Use simple heuristics if LLM fails
+  
+# Orchestration System (uses the brain above)
+orchestration:
+  enabled: true
+  mode: "intelligent"  # "intelligent" (uses brain) or "simple" (rules only)
+  
+  # Model Discovery - watches these folders for new models
+  model_discovery:
+    watch_directories: 
+      - "/models/incoming"
+      - "/models/huggingface"
+    auto_register: true
+    scan_interval_seconds: 30
+    supported_formats: [".pt", ".pth", ".onnx", ".safetensors", ".bin"]
+  
+  # Decision making frequency
+  decision_interval_seconds: 10  # Brain makes decisions every 10s
+  
+  # Orchestration Policies
+  policies:
+    # When to evict models
+    evict_after_idle_seconds: 300  # Unload after 5min idle
+    evict_when_memory_above_percent: 85  # Emergency eviction
+    
+    # Models that should NEVER be unloaded
+    always_loaded: []  # e.g., ["critical-model-v1"]
+    
+    # Priority rules
+    priority_by_qps: true  # High traffic = high priority
+    priority_by_organization: true  # Enterprise org = priority
+    priority_custom:  # Manual overrides
+      "team-ml": 10
+      "team-research": 5
+    
+    # Loading behavior
+    preload_on_first_request: true  # Start loading when queued
+    max_concurrent_loads: 2  # Load 2 models at once
+    target_load_time_seconds: 60  # Try to load in under 1min
+  
+  # Fast Loading (Advanced - requires special hardware)
+  fast_loading:
+    enabled: false  # Set true if you have GDS-capable GPUs
+    use_gpu_direct_storage: false  # Requires A100/H100 + NVMe + drivers
+    nvme_cache_path: "/mnt/nvme/models"
+    use_memory_mapping: true
+    quantize_on_load: false  # FP32 → INT8 during load
+  
+  # Request Management
+  request_routing:
+    queue_when_unloaded: true  # Queue requests for unloaded models
+    max_queue_size: 1000
+    max_queue_wait_seconds: 120  # Max wait before giving up
+    notify_on_load_complete: true
+
+# Metrics & Monitoring
+metrics:
+  enabled: true
+  collection_interval_seconds: 10
+  retention_hours: 24
+  
+  # Export to monitoring systems
+  exporters:
+    prometheus:
+      enabled: true
+      port: 9090
+      path: "/metrics"
+    
+    # Store metrics for brain training
+    storage:
+      enabled: true
+      backend: "local"  # local, s3, gcs
+      path: "/models/metrics"
+      # Brain learns from historical data
+  
+  # What to track
+  track:
+    model_requests: true
+    model_latency: true
+    model_idle_time: true
+    gpu_memory: true
+    gpu_utilization: true
+    orchestration_decisions: true
+    brain_confidence: true
+

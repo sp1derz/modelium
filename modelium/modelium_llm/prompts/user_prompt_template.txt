@@ -1,0 +1,32 @@
+## Model Descriptor
+
+```json
+{model_descriptor}
+```
+
+## Deployment Requirements
+
+- **Target Environment**: {target_environment}
+- **GPU Type**: {gpu_type}
+- **Max Latency**: {max_latency_ms}ms
+- **Expected Throughput**: {expected_qps} queries/second
+- **Batch Size**: {batch_size}
+- **Precision Preference**: {precision}
+
+## Additional Context
+
+{additional_context}
+
+## Task
+
+Generate a complete ConversionPlan that converts this model to an optimized format suitable for production deployment. Include:
+
+1. Detailed conversion steps with executable commands/scripts
+2. Triton Inference Server configuration
+3. KServe deployment manifest
+4. Smoke tests for validation
+5. Resource requirements and estimates
+6. Any warnings or limitations
+
+Output the plan as valid JSON conforming to the ConversionPlan schema.
+

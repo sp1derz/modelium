@@ -1,0 +1,43 @@
+# Modelium Config: Single Instance
+# Perfect for: Small teams, development, single server deployments
+
+organization:
+  id: "my-startup"
+  name: "My Startup"
+  enable_usage_tracking: true
+
+# Let Modelium choose the best runtime automatically
+runtime:
+  default: "auto"
+
+gpu:
+  enabled: true
+  count: null  # Auto-detect (1 GPU)
+
+vllm:
+  enabled: true
+  port: 8000
+
+ray_serve:
+  enabled: true
+  port: 8001
+  autoscaling:
+    enabled: true
+    min_replicas: 1
+    max_replicas: 5
+
+# Simple storage (local filesystem)
+storage:
+  models_dir: "/models/incoming"
+  backend: "local"
+
+# Basic monitoring
+monitoring:
+  enabled: true
+  logging:
+    level: "INFO"
+
+# No workload separation (everything on one instance)
+workload_separation:
+  enabled: false
+

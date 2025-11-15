@@ -1,0 +1,16 @@
+apiVersion: v2
+name: modelium
+description: Automated ML model ingestion, conversion, and deployment pipeline
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - machine-learning
+  - inference
+  - model-serving
+  - triton
+  - tensorrt
+maintainers:
+  - name: Modelium Team
+    email: team@modelium.ai
+

@@ -1,0 +1,264 @@
+## Modelium Helm Chart Values
+
+## Global settings
+global:
+  namespace: modelium
+  imagePullPolicy: IfNotPresent
+  storageClass: standard
+
+## PostgreSQL database
+postgresql:
+  enabled: true
+  auth:
+    username: modelium
+    password: modelium_password
+    database: modelium
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 250m
+      limits:
+        memory: 1Gi
+        cpu: 1000m
+
+## MinIO object storage
+minio:
+  enabled: true
+  mode: standalone
+  rootUser: modelium
+  rootPassword: modelium_minio_password
+  persistence:
+    enabled: true
+    size: 50Gi
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 2Gi
+      cpu: 1000m
+
+## Redis
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 5Gi
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+
+## Modelium LLM inference service
+modeliumLlm:
+  enabled: true
+  image:
+    repository: modelium/modelium-llm
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      memory: 8Gi
+      cpu: 2000m
+      nvidia.com/gpu: "1"
+    limits:
+      memory: 16Gi
+      cpu: 4000m
+      nvidia.com/gpu: "1"
+  modelPath: /models/modelium-llm
+  persistence:
+    enabled: true
+    size: 20Gi
+
+## Ingestion service
+ingestionService:
+  enabled: true
+  image:
+    repository: modelium/ingestion
+    tag: latest
+  replicas: 2
+  resources:
+    requests:
+      memory: 2Gi
+      cpu: 1000m
+    limits:
+      memory: 4Gi
+      cpu: 2000m
+  watchPath: /modelium/models/incoming
+  persistence:
+    enabled: true
+    size: 100Gi
+
+## Executor service
+executorService:
+  enabled: true
+  image:
+    repository: modelium/executor
+    tag: latest
+  replicas: 3
+  resources:
+    requests:
+      memory: 16Gi
+      cpu: 4000m
+    limits:
+      memory: 32Gi
+      cpu: 8000m
+  # Requires privileged mode for Docker-in-Docker
+  privileged: true
+  workspace:
+    size: 100Gi
+  gpuEnabled: true
+
+## Deployment service
+deploymentService:
+  enabled: true
+  image:
+    repository: modelium/deployment
+    tag: latest
+  replicas: 2
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: 1000m
+
+## Frontend API
+frontendApi:
+  enabled: true
+  image:
+    repository: modelium/frontend-api
+    tag: latest
+  replicas: 2
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 500m
+    limits:
+      memory: 1Gi
+      cpu: 1000m
+  service:
+    type: LoadBalancer
+    port: 80
+    targetPort: 8000
+
+## Frontend Web
+frontendWeb:
+  enabled: true
+  image:
+    repository: modelium/frontend-web
+    tag: latest
+  replicas: 2
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+## Triton Inference Server
+triton:
+  enabled: true
+  image:
+    repository: nvcr.io/nvidia/tritonserver
+    tag: 23.10-py3
+  replicas: 3
+  resources:
+    requests:
+      memory: 8Gi
+      cpu: 2000m
+      nvidia.com/gpu: "1"
+    limits:
+      memory: 16Gi
+      cpu: 4000m
+      nvidia.com/gpu: "1"
+  modelRepository:
+    persistence:
+      enabled: true
+      size: 100Gi
+  service:
+    type: ClusterIP
+    httpPort: 8000
+    grpcPort: 8001
+    metricsPort: 8002
+
+## KServe
+kserve:
+  enabled: true
+  namespace: modelium-inference
+
+## Monitoring
+monitoring:
+  prometheus:
+    enabled: true
+    retention: 15d
+    storageSize: 50Gi
+  grafana:
+    enabled: true
+    adminPassword: modelium
+    persistence:
+      enabled: true
+      size: 5Gi
+
+## Ingress
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: modelium.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend-api
+    - host: grafana.modelium.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: grafana
+  tls:
+    - secretName: modelium-tls
+      hosts:
+        - modelium.example.com
+        - grafana.modelium.example.com
+
+## Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+## Security
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+## Network Policies
+networkPolicies:
+  enabled: true
+
+## Service Mesh (Istio)
+serviceMesh:
+  enabled: false
+  mtls: true
+

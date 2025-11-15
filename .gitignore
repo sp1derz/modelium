@@ -1,0 +1,99 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# PyCharm
+.idea/
+
+# VSCode
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Models & Data (large files)
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.bin
+*.ckpt
+*.pkl
+*.pickle
+models/
+!models/.gitkeep
+data/
+!data/.gitkeep
+
+# Logs & Artifacts
+*.log
+logs/
+artifacts/
+outputs/
+runs/
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Secrets
+.env
+.env.local
+*.key
+*.pem
+secrets/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Generated deployment files
+deploy_*.py
+!examples/deploy_*.py
+modelium_deployment_*.yaml
+
+# Monitoring & Metrics
+prometheus_data/
+grafana_data/
