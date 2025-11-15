@@ -2,12 +2,32 @@
 
 ## Prerequisites
 
-- Python 3.9+
-- NVIDIA GPU (optional, can run on CPU)
-- 8GB+ RAM
-- Linux or macOS
+- Python 3.10+
+- NVIDIA GPU with CUDA 12.0+ (recommended)
+- 8GB+ RAM (16GB+ for production)
+- Linux, macOS, or Windows (WSL2)
+- Docker (optional, for containerized deployment)
 
-## Installation
+## Deployment Options
+
+Choose your deployment method:
+
+1. **🐳 Docker Compose** (Recommended) - [DOCKER.md](../DOCKER.md)
+   - Fastest setup
+   - GPU support included
+   - Good for local testing and small production
+
+2. **☸️ Kubernetes** (Production) - [DEPLOYMENT.md](../DEPLOYMENT.md)
+   - Enterprise-grade
+   - Auto-scaling
+   - Multi-node support
+
+3. **🐍 Python CLI** (Development) - Continue below
+   - Full control
+   - Easy debugging
+   - Ideal for development
+
+## Installation (Python CLI)
 
 ### Step 1: Clone the Repository
 
@@ -136,10 +156,18 @@ curl -X POST http://localhost:8000/predict/your_model \
 
 ## What's Next?
 
-- Read [Architecture](architecture.md) to understand how it works
-- Check [The Brain](brain.md) to learn about AI orchestration
-- See [Usage Guide](usage.md) for complete examples
-- Explore [Configuration](../configs/README.md) for advanced setups
+**Deployment**:
+- [Docker Guide](../DOCKER.md) - Docker Compose for local/testing
+- [Deployment Guide](../DEPLOYMENT.md) - Kubernetes and Helm for production
+
+**Understanding the System**:
+- [Architecture](architecture.md) - How Modelium works
+- [The Brain](brain.md) - AI orchestration explained
+- [Usage Guide](usage.md) - Complete CLI and API reference
+
+**Advanced**:
+- [Configuration Examples](../configs/README.md) - Multi-instance, workload separation
+- [Testing Guide](../TESTING_TOMORROW.md) - End-to-end testing
 
 ## Common Issues
 

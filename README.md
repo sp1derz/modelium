@@ -16,7 +16,35 @@ Modelium is an open-source library that automatically discovers, analyzes, and d
 
 ## 🚀 Quick Start
 
-### Installation
+### Option 1: Docker (Recommended)
+
+```bash
+# Clone and start
+git clone https://github.com/sp1derz/modelium.git
+cd modelium
+
+# Start with Docker Compose
+docker-compose up -d
+
+# Check status
+curl http://localhost:8000/health
+```
+
+See [DOCKER.md](DOCKER.md) for GPU setup.
+
+### Option 2: Kubernetes (Production)
+
+```bash
+# Deploy with kubectl
+kubectl apply -k infra/k8s/
+
+# Or with Helm
+helm install modelium ./infra/helm/modelium -n modelium --create-namespace
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for complete guide.
+
+### Option 3: Python CLI (Development)
 
 ```bash
 # Clone the repository
@@ -147,10 +175,17 @@ The AI brain:
 
 ## 📚 Documentation
 
+**Getting Started**:
 - [Getting Started](docs/getting-started.md) - Installation and first steps
+- [Docker Guide](DOCKER.md) - Docker and Docker Compose
+- [Deployment Guide](DEPLOYMENT.md) - K8s, Helm, Cloud providers
+
+**Architecture**:
 - [Architecture](docs/architecture.md) - System design and components
 - [The Brain](docs/brain.md) - How AI orchestration works
-- [Usage Guide](docs/usage.md) - Complete user guide
+
+**Usage**:
+- [Usage Guide](docs/usage.md) - CLI commands and API
 - [Testing Guide](TESTING_TOMORROW.md) - Step-by-step testing
 - [Status](STATUS.md) - Implementation status and roadmap
 
@@ -208,6 +243,17 @@ See [configuration examples](configs/) for advanced setups.
 - **Research Labs**: Dynamic resource allocation, experiment freely
 - **Enterprises**: Multi-tenant serving, usage tracking, cost optimization
 
+## 🏗️ Deployment Options
+
+| Method | Time | Use Case | Guide |
+|--------|------|----------|-------|
+| **Docker Compose** | 5 min | Local/Testing | [DOCKER.md](DOCKER.md) |
+| **Kubernetes** | 10 min | Production | [DEPLOYMENT.md](DEPLOYMENT.md) |
+| **Helm Chart** | 5 min | Enterprise | [DEPLOYMENT.md](DEPLOYMENT.md) |
+| **Python CLI** | 2 min | Development | [Getting Started](docs/getting-started.md) |
+
+**Cloud Support**: AWS (EKS), GCP (GKE), Azure (AKS), on-prem Kubernetes
+
 ## 🤝 Contributing
 
 We welcome contributions! Areas of interest:
@@ -244,13 +290,17 @@ Built with:
 - ✅ Multi-GPU support
 - ✅ Real-time metrics tracking
 - ✅ FastAPI endpoints
+- ✅ Docker & Docker Compose
+- ✅ Kubernetes manifests
+- ✅ Helm chart
+- ✅ CI/CD pipeline (GitHub Actions)
 
 **Coming Soon**:
 - ⏳ Prometheus metrics export
-- ⏳ Docker containers
-- ⏳ Kubernetes manifests
+- ⏳ Grafana dashboards
 - ⏳ Fine-tuned brain model on HuggingFace
 - ⏳ Request queueing
+- ⏳ Multi-instance orchestration
 
 ---
 
