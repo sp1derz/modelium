@@ -1,2 +1,2 @@
-"""Training pipeline for Forge LLM."""
+"""Training pipeline for Modelium LLM."""
 

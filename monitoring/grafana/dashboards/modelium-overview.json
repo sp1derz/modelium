@@ -1,7 +1,7 @@
 {
   "dashboard": {
-    "title": "Forge - System Overview",
-    "tags": ["forge", "overview"],
+    "title": "Modelium - System Overview",
+    "tags": ["modelium", "overview"],
     "timezone": "browser",
     "panels": [
       {
@@ -10,7 +10,7 @@
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(forge_models_ingested_total[5m])",
+            "expr": "rate(modelium_models_ingested_total[5m])",
             "legendFormat": "{{ namespace }}"
           }
         ],
@@ -22,7 +22,7 @@
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(forge_conversions_success_total[5m]) / rate(forge_conversions_total[5m])",
+            "expr": "rate(modelium_conversions_success_total[5m]) / rate(modelium_conversions_total[5m])",
             "legendFormat": "Success Rate"
           }
         ],
@@ -34,7 +34,7 @@
         "type": "stat",
         "targets": [
           {
-            "expr": "forge_active_conversions",
+            "expr": "modelium_active_conversions",
             "legendFormat": "Active"
           }
         ],
@@ -58,7 +58,7 @@
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(forge_conversion_duration_seconds_sum[5m]) / rate(forge_conversion_duration_seconds_count[5m])",
+            "expr": "rate(modelium_conversion_duration_seconds_sum[5m]) / rate(modelium_conversion_duration_seconds_count[5m])",
             "legendFormat": "Avg Time (s)"
           }
         ],
@@ -66,24 +66,24 @@
       },
       {
         "id": 6,
-        "title": "Triton Inference Throughput",
+        "title": "vLLM/Ray Inference Throughput",
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(nv_inference_request_success[5m])",
-            "legendFormat": "{{ model_name }}"
+            "expr": "rate(modelium_inference_requests_total[5m])",
+            "legendFormat": "{{ model_name }} - {{ runtime }}"
           }
         ],
         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
       },
       {
         "id": 7,
-        "title": "Triton Inference Latency (P95)",
+        "title": "Inference Latency (P95)",
         "type": "graph",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, rate(nv_inference_request_duration_us_bucket[5m]))",
-            "legendFormat": "{{ model_name }}"
+            "expr": "histogram_quantile(0.95, rate(modelium_inference_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{ model_name }} - {{ runtime }}"
           }
         ],
         "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
@@ -111,6 +111,30 @@
           }
         ],
         "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      },
+      {
+        "id": 10,
+        "title": "Models Loaded per GPU",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "modelium_models_loaded_per_gpu",
+            "legendFormat": "GPU {{ gpu_id }}"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 32}
+      },
+      {
+        "id": 11,
+        "title": "Orchestrator Decisions",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(modelium_orchestrator_actions_total[5m])",
+            "legendFormat": "{{ action }}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 6, "y": 32}
       }
     ],
     "refresh": "30s",

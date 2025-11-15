@@ -1,2 +1,2 @@
-"""Inference server for Forge LLM."""
+"""Inference server for Modelium LLM."""
 

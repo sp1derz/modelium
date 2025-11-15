@@ -19,15 +19,14 @@ RUN pip3 install poetry && \
 
 # Copy application code
 COPY modelium/ /app/modelium/
-COPY forge_llm/ /app/forge_llm/
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV MODEL_PATH=/models/forge-llm
+ENV MODEL_PATH=/models/modelium-llm
 
 # Expose port
 EXPOSE 8000
 
 # Run server
-CMD ["python3", "-m", "forge.forge_llm.server.inference"]
+CMD ["python3", "-m", "modelium.modelium_llm.server.inference"]
 

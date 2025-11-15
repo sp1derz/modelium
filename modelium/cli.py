@@ -369,9 +369,9 @@ def upload(
     file: Path = typer.Argument(..., help="Path to model file"),
     name: Optional[str] = typer.Option(None, help="Model name"),
     framework: Optional[str] = typer.Option(None, help="Framework (pytorch, onnx, tensorflow)"),
-    api_url: str = typer.Option("http://localhost:8000", help="Forge API URL"),
+    api_url: str = typer.Option("http://localhost:8000", help="Modelium API URL"),
 ):
-    """Upload a model to Forge."""
+    """Upload a model to Modelium."""
     
     if not file.exists():
         console.print(f"[red]Error: File not found: {file}[/red]")
@@ -401,7 +401,7 @@ def upload(
 
 @app.command()
 def list(
-    api_url: str = typer.Option("http://localhost:8000", help="Forge API URL"),
+    api_url: str = typer.Option("http://localhost:8000", help="Modelium API URL"),
 ):
     """List all models."""
     
@@ -439,7 +439,7 @@ def list(
 @app.command()
 def status(
     model_id: str = typer.Argument(..., help="Model ID"),
-    api_url: str = typer.Option("http://localhost:8000", help="Forge API URL"),
+    api_url: str = typer.Option("http://localhost:8000", help="Modelium API URL"),
 ):
     """Get model status."""
     
@@ -464,7 +464,7 @@ def status(
 @app.command()
 def watch(
     model_id: str = typer.Argument(..., help="Model ID"),
-    api_url: str = typer.Option("http://localhost:8000", help="Forge API URL"),
+    api_url: str = typer.Option("http://localhost:8000", help="Modelium API URL"),
 ):
     """Watch model conversion progress."""
     
@@ -500,7 +500,7 @@ def watch(
 def logs(
     model_id: str = typer.Argument(..., help="Model ID"),
     follow: bool = typer.Option(False, "--follow", "-f", help="Follow logs"),
-    api_url: str = typer.Option("http://localhost:8000", help="Forge API URL"),
+    api_url: str = typer.Option("http://localhost:8000", help="Modelium API URL"),
 ):
     """View model conversion logs."""
     
@@ -536,7 +536,7 @@ def logs(
 def delete(
     model_id: str = typer.Argument(..., help="Model ID"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
-    api_url: str = typer.Option("http://localhost:8000", help="Forge API URL"),
+    api_url: str = typer.Option("http://localhost:8000", help="Modelium API URL"),
 ):
     """Delete a model."""
     
@@ -560,7 +560,7 @@ def deploy(
     model_id: str = typer.Argument(..., help="Model ID"),
     target: str = typer.Option("triton", help="Deployment target (triton, kserve)"),
     replicas: int = typer.Option(3, help="Number of replicas"),
-    api_url: str = typer.Option("http://localhost:8000", help="Forge API URL"),
+    api_url: str = typer.Option("http://localhost:8000", help="Modelium API URL"),
 ):
     """Deploy a converted model."""
     

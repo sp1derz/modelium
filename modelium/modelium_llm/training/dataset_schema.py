@@ -1,5 +1,5 @@
 """
-Training dataset schema for Forge LLM.
+Training dataset schema for Modelium LLM.
 
 Each training example consists of a model descriptor and a corresponding
 conversion plan that was successfully executed.
@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 class TrainingExample(BaseModel):
     """
-    A single training example for the Forge LLM.
+    A single training example for the Modelium LLM.
     
     The model learns to map descriptors to successful conversion plans.
     """

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Example: Deploy HuggingFace model with Forge
+Example: Deploy HuggingFace model with Modelium
 
 This example shows how to:
 1. Download a model from HuggingFace Hub
-2. Deploy it using Forge
+2. Deploy it using Modelium
 3. Make predictions
 """
 
@@ -100,7 +100,7 @@ def main():
     if model and model.get("endpoint"):
         test_inference(
             model["endpoint"],
-            "Forge is amazing for ML deployment!"
+            "Modelium is amazing for ML deployment!"
         )
     
     # Example 2: DistilBERT

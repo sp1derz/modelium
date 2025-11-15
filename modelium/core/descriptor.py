@@ -103,7 +103,7 @@ class ModelDescriptor(BaseModel):
     """
     Complete descriptor for a model artifact.
     
-    This is the core data structure that flows through the Forge pipeline.
+    This is the core data structure that flows through the Modelium pipeline.
     """
     
     # Identification
