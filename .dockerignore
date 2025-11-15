@@ -36,9 +36,10 @@ Thumbs.db
 .git/
 .gitignore
 
-# Docs
-docs/_build/
+# Docs (but keep README.md for Poetry)
+docs/
 *.md
+!README.md
 
 # CI/CD
 .github/
