@@ -208,6 +208,130 @@ def serve(
 
 
 @app.command()
+def check(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed information"),
+):
+    """Check system requirements and dependencies."""
+    
+    console.print("[bold]🔍 Modelium System Check[/bold]\n")
+    
+    all_ok = True
+    
+    # Python version
+    import sys
+    py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    if sys.version_info >= (3, 10):
+        console.print(f"✅ Python {py_version}")
+    else:
+        console.print(f"❌ Python {py_version} (require 3.10+)")
+        all_ok = False
+    
+    # Core dependencies
+    deps = {
+        "torch": "PyTorch",
+        "fastapi": "FastAPI",
+        "uvicorn": "Uvicorn",
+        "pydantic": "Pydantic",
+        "transformers": "Transformers (for Brain)",
+    }
+    
+    console.print("\n[bold]Core Dependencies:[/bold]")
+    for module, name in deps.items():
+        try:
+            mod = __import__(module)
+            version = getattr(mod, "__version__", "unknown")
+            console.print(f"✅ {name}: {version}")
+        except ImportError:
+            console.print(f"❌ {name}: Not installed")
+            all_ok = False
+    
+    # Optional dependencies
+    console.print("\n[bold]Optional Dependencies:[/bold]")
+    optional = {
+        "vllm": "vLLM (for LLM serving)",
+        "ray": "Ray Serve (for general models)",
+    }
+    
+    for module, name in optional.items():
+        try:
+            mod = __import__(module)
+            version = getattr(mod, "__version__", "unknown")
+            console.print(f"✅ {name}: {version}")
+        except ImportError:
+            console.print(f"⚠️  {name}: Not installed (optional)")
+    
+    # GPU check
+    console.print("\n[bold]GPU:[/bold]")
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_count = torch.cuda.device_count()
+            console.print(f"✅ CUDA available: {gpu_count} GPU(s)")
+            if verbose:
+                for i in range(gpu_count):
+                    name = torch.cuda.get_device_name(i)
+                    mem = torch.cuda.get_device_properties(i).total_memory / 1e9
+                    console.print(f"   GPU {i}: {name} ({mem:.1f}GB)")
+        else:
+            console.print("⚠️  No GPU detected (CPU only)")
+    except Exception as e:
+        console.print(f"❌ GPU check failed: {e}")
+    
+    # Config file
+    console.print("\n[bold]Configuration:[/bold]")
+    config_paths = ["modelium.yaml", "modelium.yml"]
+    config_found = False
+    for path in config_paths:
+        if Path(path).exists():
+            console.print(f"✅ Config found: {path}")
+            config_found = True
+            break
+    if not config_found:
+        console.print("⚠️  No config file (use 'modelium init')")
+    
+    # Watch directories
+    if config_found:
+        try:
+            from modelium.config import load_config
+            cfg = load_config()
+            console.print(f"\n[bold]Watch Directories:[/bold]")
+            for dir_path in cfg.orchestration.model_discovery.watch_directories:
+                p = Path(dir_path)
+                if p.exists():
+                    console.print(f"✅ {dir_path}")
+                else:
+                    console.print(f"⚠️  {dir_path} (doesn't exist)")
+        except Exception as e:
+            console.print(f"❌ Error loading config: {e}")
+    
+    # Disk space
+    console.print("\n[bold]Disk Space:[/bold]")
+    import shutil
+    try:
+        total, used, free = shutil.disk_usage("/")
+        free_gb = free / 1e9
+        if free_gb > 50:
+            console.print(f"✅ {free_gb:.1f}GB free")
+        else:
+            console.print(f"⚠️  {free_gb:.1f}GB free (recommend >50GB)")
+    except Exception as e:
+        console.print(f"❌ Disk check failed: {e}")
+    
+    # Summary
+    console.print()
+    if all_ok:
+        console.print("[green]✅ All critical dependencies installed[/green]")
+        console.print("\nNext steps:")
+        console.print("  1. modelium init    # Create config")
+        console.print("  2. modelium serve   # Start server")
+    else:
+        console.print("[red]❌ Some critical dependencies missing[/red]")
+        console.print("\nInstall missing dependencies:")
+        console.print("  pip install -e .[all]")
+        console.print("  pip install vllm  # Separate install")
+
+
+@app.command()
 def init(
     output: Path = typer.Option("modelium.yaml", help="Output config file"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing file"),

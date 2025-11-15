@@ -199,14 +199,35 @@ class Orchestrator:
             self.registry.update_model(model_name, status=ModelStatus.ERROR)
     
     def _get_gpu_memory_state(self) -> dict:
-        """Get GPU memory state."""
-        # TODO: Query actual GPU memory from CUDA
-        # For now, return dummy data
-        gpu_count = self.config.gpu.count or 4
-        return {
-            f"gpu_{i}": {"used": 0, "total": 80}
-            for i in range(gpu_count)
-        }
+        """Get GPU memory state from actual GPUs."""
+        import torch
+        
+        gpu_state = {}
+        
+        if not torch.cuda.is_available():
+            # No GPU, return empty
+            return {}
+        
+        for i in range(torch.cuda.device_count()):
+            try:
+                # Get memory in GB
+                props = torch.cuda.get_device_properties(i)
+                total = props.total_memory / 1e9
+                
+                # Get allocated/reserved memory
+                allocated = torch.cuda.memory_allocated(i) / 1e9
+                reserved = torch.cuda.memory_reserved(i) / 1e9
+                
+                gpu_state[f"gpu_{i}"] = {
+                    "used": reserved,  # Use reserved as "used"
+                    "total": total,
+                    "allocated": allocated,
+                }
+            except Exception as e:
+                logger.error(f"Error getting GPU {i} memory: {e}")
+                gpu_state[f"gpu_{i}"] = {"used": 0, "total": 0}
+        
+        return gpu_state
     
     def on_model_discovered(self, model_name: str, model_path: str):
         """
