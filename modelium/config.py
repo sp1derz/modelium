@@ -193,21 +193,115 @@ class ExperimentalConfig(BaseModel):
     enable_quantization_auto_tuning: bool = False
 
 
+class ModeliumBrainConfig(BaseModel):
+    """Modelium Brain (AI decision engine) settings."""
+    enabled: bool = True
+    model_name: str = "modelium/brain-v1"
+    device: str = "cuda:0"
+    dtype: str = "float16"
+    max_new_tokens: int = 2048
+    temperature: float = 0.3
+    timeout_seconds: int = 5
+    fallback_to_rules: bool = True
+
+
+class ModelDiscoveryConfig(BaseModel):
+    """Model discovery settings."""
+    watch_directories: List[str] = Field(default_factory=lambda: ["/models/incoming"])
+    auto_register: bool = True
+    scan_interval_seconds: int = 30
+    supported_formats: List[str] = Field(default_factory=lambda: [".pt", ".pth", ".onnx", ".safetensors", ".bin"])
+
+
+class OrchestrationPoliciesConfig(BaseModel):
+    """Orchestration policy settings."""
+    evict_after_idle_seconds: int = 300
+    evict_when_memory_above_percent: int = 85
+    always_loaded: List[str] = Field(default_factory=list)
+    priority_by_qps: bool = True
+    priority_by_organization: bool = True
+    priority_custom: Dict[str, int] = Field(default_factory=dict)
+    preload_on_first_request: bool = True
+    max_concurrent_loads: int = 2
+    target_load_time_seconds: int = 60
+
+
+class FastLoadingConfig(BaseModel):
+    """Fast loading settings."""
+    enabled: bool = False
+    use_gpu_direct_storage: bool = False
+    nvme_cache_path: str = "/mnt/nvme/models"
+    use_memory_mapping: bool = True
+    quantize_on_load: bool = False
+
+
+class RequestRoutingConfig(BaseModel):
+    """Request routing settings."""
+    queue_when_unloaded: bool = True
+    max_queue_size: int = 1000
+    max_queue_wait_seconds: int = 120
+    notify_on_load_complete: bool = True
+
+
+class OrchestrationConfig(BaseModel):
+    """Orchestration system settings."""
+    enabled: bool = True
+    mode: str = "intelligent"  # intelligent or simple
+    model_discovery: ModelDiscoveryConfig = Field(default_factory=ModelDiscoveryConfig)
+    decision_interval_seconds: int = 10
+    policies: OrchestrationPoliciesConfig = Field(default_factory=OrchestrationPoliciesConfig)
+    fast_loading: FastLoadingConfig = Field(default_factory=FastLoadingConfig)
+    request_routing: RequestRoutingConfig = Field(default_factory=RequestRoutingConfig)
+
+
+class MetricsConfig(BaseModel):
+    """Metrics collection settings."""
+    enabled: bool = True
+    collection_interval_seconds: int = 10
+    retention_hours: int = 24
+    exporters: Dict[str, Any] = Field(default_factory=lambda: {
+        "prometheus": {"enabled": True, "port": 9090, "path": "/metrics"},
+        "storage": {"enabled": True, "backend": "local", "path": "/models/metrics"}
+    })
+    track: Dict[str, bool] = Field(default_factory=lambda: {
+        "model_requests": True,
+        "model_latency": True,
+        "model_idle_time": True,
+        "gpu_memory": True,
+        "gpu_utilization": True,
+        "orchestration_decisions": True,
+        "brain_confidence": True
+    })
+
+
 class ModeliumConfig(BaseModel):
     """Complete Modelium configuration."""
     
     organization: OrganizationConfig = Field(default_factory=OrganizationConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     gpu: GPUConfig = Field(default_factory=GPUConfig)
+    
+    # Intelligent orchestration
+    modelium_brain: ModeliumBrainConfig = Field(default_factory=ModeliumBrainConfig)
+    orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    
+    # Runtimes
     vllm: VLLMConfig = Field(default_factory=VLLMConfig)
     ray_serve: RayServeConfig = Field(default_factory=RayServeConfig)
     tensorrt: TensorRTConfig = Field(default_factory=TensorRTConfig)
     triton: TritonConfig = Field(default_factory=TritonConfig)
+    
+    # Conversion & Deployment
     conversion: ConversionConfig = Field(default_factory=ConversionConfig)
     deployment: DeploymentConfig = Field(default_factory=DeploymentConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    
+    # Monitoring & Security
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    
+    # Advanced features
     workload_separation: WorkloadSeparationConfig = Field(default_factory=WorkloadSeparationConfig)
     rate_limiting: RateLimitingConfig = Field(default_factory=RateLimitingConfig)
     usage_tracking: UsageTrackingConfig = Field(default_factory=UsageTrackingConfig)
