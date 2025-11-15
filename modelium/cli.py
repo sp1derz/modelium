@@ -73,29 +73,45 @@ def serve(
         console.print()
         console.print("🚀 Server starting...")
         console.print(f"   API: http://{host}:{port}")
+        console.print(f"   Status: http://{host}:{port}/status")
         console.print(f"   Metrics: http://{host}:9090/metrics")
         console.print()
         console.print("Press Ctrl+C to stop")
         console.print()
         
-        # TODO: Start actual server (FastAPI/uvicorn)
-        # For now, just keep process alive for testing
-        console.print("[yellow]⚠️  Note: Full server implementation in progress[/yellow]")
-        console.print("[yellow]   Currently in test mode - server placeholder[/yellow]")
-        console.print()
+        # Start FastAPI server
+        import uvicorn
+        from fastapi import FastAPI
+        from fastapi.responses import JSONResponse
         
-        import signal
-        import time
+        app = FastAPI(title="Modelium API")
         
-        def signal_handler(sig, frame):
-            console.print("\n[yellow]Shutting down...[/yellow]")
-            sys.exit(0)
+        @app.get("/")
+        async def root():
+            return {"message": "Modelium API", "version": "0.1.0"}
         
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        @app.get("/status")
+        async def status():
+            import torch
+            gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+            return {
+                "status": "running",
+                "organization": cfg.organization.id,
+                "gpu_count": gpu_count,
+                "gpu_enabled": cfg.gpu.enabled,
+                "brain_enabled": cfg.modelium_brain.enabled,
+                "orchestration_enabled": cfg.orchestration.enabled,
+                "models_loaded": 0,  # TODO: Track loaded models
+                "models_discovered": 0,  # TODO: Track discovered models
+            }
         
-        while True:
-            time.sleep(1)
+        @app.get("/health")
+        async def health():
+            return {"status": "healthy"}
+        
+        # Run server
+        console.print("[green]✅ Server ready![/green]")
+        uvicorn.run(app, host=host, port=port, log_level="info")
             
     except KeyboardInterrupt:
         console.print("\n[yellow]Shutting down...[/yellow]")
