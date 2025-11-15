@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: modelium-server
+  namespace: modelium
+  labels:
+    app: modelium
+    component: server
+spec:
+  replicas: 1  # Single instance for now (GPU contention)
+  strategy:
+    type: Recreate  # Don't run multiple replicas simultaneously
+  selector:
+    matchLabels:
+      app: modelium
+      component: server
+  template:
+    metadata:
+      labels:
+        app: modelium
+        component: server
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Node selector for GPU nodes
+      nodeSelector:
+        nvidia.com/gpu: "true"
+      
+      # Tolerations for GPU nodes (if tainted)
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      
+      # Service account (for RBAC if needed)
+      serviceAccountName: modelium-server
+      
+      # Init container to check GPU availability
+      initContainers:
+        - name: check-gpu
+          image: nvidia/cuda:12.1.0-base-ubuntu22.04
+          command:
+            - sh
+            - -c
+            - |
+              nvidia-smi || (echo "No GPU found!" && exit 1)
+              echo "GPU detected successfully"
+      
+      containers:
+        - name: modelium
+          image: ghcr.io/sp1derz/modelium:latest  # Update with your registry
+          imagePullPolicy: Always
+          
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          
+          env:
+            - name: MODELIUM_CONFIG
+              value: /app/config/modelium.yaml
+            - name: LOG_LEVEL
+              value: INFO
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # GPU selection (K8s will set CUDA_VISIBLE_DEVICES)
+          
+          resources:
+            requests:
+              memory: "16Gi"
+              cpu: "4"
+              nvidia.com/gpu: "4"  # Request 4 GPUs
+            limits:
+              memory: "64Gi"
+              cpu: "16"
+              nvidia.com/gpu: "4"
+          
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: models
+              mountPath: /models
+            - name: logs
+              mountPath: /app/logs
+          
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30  # Allow 5 minutes for brain to load
+      
+      volumes:
+        - name: config
+          configMap:
+            name: modelium-config
+        - name: models
+          persistentVolumeClaim:
+            claimName: modelium-models
+        - name: logs
+          persistentVolumeClaim:
+            claimName: modelium-logs
+      
+      # Security context
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+

@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: modelium-server
+  namespace: modelium
+  labels:
+    app: modelium
+    component: server
+spec:
+  type: ClusterIP
+  selector:
+    app: modelium
+    component: server
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  sessionAffinity: ClientIP  # Sticky sessions for same client
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: modelium-metrics
+  namespace: modelium
+  labels:
+    app: modelium
+    component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    app: modelium
+    component: server
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+

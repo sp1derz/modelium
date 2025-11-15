@@ -1,70 +1,40 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: modelium-executor
+  name: modelium-server
   namespace: modelium
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: modelium-executor-role
+  name: modelium-server
   namespace: modelium
 rules:
+  # Allow reading ConfigMaps
   - apiGroups: [""]
-    resources: ["pods", "pods/log"]
-    verbs: ["get", "list", "watch", "create", "delete"]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  
+  # Allow reading Secrets (if needed)
   - apiGroups: [""]
-    resources: ["secrets", "configmaps"]
+    resources: ["secrets"]
     verbs: ["get", "list"]
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["get", "list", "watch", "create", "delete"]
+  
+  # Allow accessing PVCs
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: modelium-executor-rolebinding
+  name: modelium-server
   namespace: modelium
+subjects:
+  - kind: ServiceAccount
+    name: modelium-server
+    namespace: modelium
 roleRef:
-  apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: modelium-executor-role
-subjects:
-  - kind: ServiceAccount
-    name: modelium-executor
-    namespace: modelium
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: modelium-deployment
-  namespace: modelium
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: modelium-deployment-role
-rules:
-  - apiGroups: ["serving.kserve.io"]
-    resources: ["inferenceservices"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["services", "configmaps"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: modelium-deployment-rolebinding
-roleRef:
+  name: modelium-server
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: modelium-deployment-role
-subjects:
-  - kind: ServiceAccount
-    name: modelium-deployment
-    namespace: modelium
-

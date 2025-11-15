@@ -4,14 +4,4 @@ metadata:
   name: modelium
   labels:
     name: modelium
-    istio-injection: enabled
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: modelium-inference
-  labels:
-    name: modelium-inference
-    serving.kserve.io/inferenceservice: enabled
-    istio-injection: enabled
-
+    app: modelium

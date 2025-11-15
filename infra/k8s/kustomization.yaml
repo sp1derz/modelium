@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: modelium
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+# Common labels
+commonLabels:
+  app.kubernetes.io/name: modelium
+  app.kubernetes.io/managed-by: kustomize
+
+# Images (override with specific versions)
+images:
+  - name: ghcr.io/sp1derz/modelium
+    newTag: latest
+
+# ConfigMap generator (alternative to configmap.yaml)
+# configMapGenerator:
+#   - name: modelium-config
+#     files:
+#       - modelium.yaml
+
+# Patches for different environments
+# patchesStrategicMerge:
+#   - overlays/production/patch.yaml
+

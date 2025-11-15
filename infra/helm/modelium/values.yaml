@@ -1,264 +1,194 @@
-## Modelium Helm Chart Values
+# Default values for modelium Helm chart
 
-## Global settings
+# Global settings
 global:
-  namespace: modelium
-  imagePullPolicy: IfNotPresent
-  storageClass: standard
+  imageRegistry: ghcr.io
+  imageTag: latest
+  imagePullPolicy: Always
 
-## PostgreSQL database
-postgresql:
-  enabled: true
-  auth:
-    username: modelium
-    password: modelium_password
-    database: modelium
-  primary:
-    persistence:
-      enabled: true
-      size: 10Gi
-    resources:
-      requests:
-        memory: 256Mi
-        cpu: 250m
-      limits:
-        memory: 1Gi
-        cpu: 1000m
+# Image configuration
+image:
+  repository: sp1derz/modelium
+  pullPolicy: Always
+  tag: ""  # Overrides global.imageTag
 
-## MinIO object storage
-minio:
-  enabled: true
-  mode: standalone
-  rootUser: modelium
-  rootPassword: modelium_minio_password
-  persistence:
-    enabled: true
-    size: 50Gi
-  resources:
-    requests:
-      memory: 512Mi
-      cpu: 250m
-    limits:
-      memory: 2Gi
-      cpu: 1000m
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
 
-## Redis
-redis:
-  enabled: true
-  architecture: standalone
-  auth:
-    enabled: false
-  master:
-    persistence:
-      enabled: true
-      size: 5Gi
-    resources:
-      requests:
-        memory: 256Mi
-        cpu: 100m
-      limits:
-        memory: 512Mi
-        cpu: 500m
+# Replica count (keep at 1 for GPU)
+replicaCount: 1
 
-## Modelium LLM inference service
-modeliumLlm:
-  enabled: true
-  image:
-    repository: modelium/modelium-llm
-    tag: latest
-    pullPolicy: IfNotPresent
-  replicas: 1
-  resources:
-    requests:
-      memory: 8Gi
-      cpu: 2000m
-      nvidia.com/gpu: "1"
-    limits:
-      memory: 16Gi
-      cpu: 4000m
-      nvidia.com/gpu: "1"
-  modelPath: /models/modelium-llm
-  persistence:
-    enabled: true
-    size: 20Gi
+# Service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: "modelium-server"
 
-## Ingestion service
-ingestionService:
-  enabled: true
-  image:
-    repository: modelium/ingestion
-    tag: latest
-  replicas: 2
-  resources:
-    requests:
-      memory: 2Gi
-      cpu: 1000m
-    limits:
-      memory: 4Gi
-      cpu: 2000m
-  watchPath: /modelium/models/incoming
-  persistence:
-    enabled: true
-    size: 100Gi
+# Pod annotations
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"
 
-## Executor service
-executorService:
-  enabled: true
-  image:
-    repository: modelium/executor
-    tag: latest
-  replicas: 3
-  resources:
-    requests:
-      memory: 16Gi
-      cpu: 4000m
-    limits:
-      memory: 32Gi
-      cpu: 8000m
-  # Requires privileged mode for Docker-in-Docker
-  privileged: true
-  workspace:
-    size: 100Gi
-  gpuEnabled: true
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
 
-## Deployment service
-deploymentService:
-  enabled: true
-  image:
-    repository: modelium/deployment
-    tag: latest
-  replicas: 2
-  resources:
-    requests:
-      memory: 1Gi
-      cpu: 500m
-    limits:
-      memory: 2Gi
-      cpu: 1000m
+# Container security context
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  allowPrivilegeEscalation: false
 
-## Frontend API
-frontendApi:
-  enabled: true
-  image:
-    repository: modelium/frontend-api
-    tag: latest
-  replicas: 2
-  resources:
-    requests:
-      memory: 512Mi
-      cpu: 500m
-    limits:
-      memory: 1Gi
-      cpu: 1000m
-  service:
-    type: LoadBalancer
-    port: 80
-    targetPort: 8000
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8000
+  metricsPort: 9090
+  annotations: {}
 
-## Frontend Web
-frontendWeb:
-  enabled: true
-  image:
-    repository: modelium/frontend-web
-    tag: latest
-  replicas: 2
-  resources:
-    requests:
-      memory: 256Mi
-      cpu: 250m
-    limits:
-      memory: 512Mi
-      cpu: 500m
-
-## Triton Inference Server
-triton:
-  enabled: true
-  image:
-    repository: nvcr.io/nvidia/tritonserver
-    tag: 23.10-py3
-  replicas: 3
-  resources:
-    requests:
-      memory: 8Gi
-      cpu: 2000m
-      nvidia.com/gpu: "1"
-    limits:
-      memory: 16Gi
-      cpu: 4000m
-      nvidia.com/gpu: "1"
-  modelRepository:
-    persistence:
-      enabled: true
-      size: 100Gi
-  service:
-    type: ClusterIP
-    httpPort: 8000
-    grpcPort: 8001
-    metricsPort: 8002
-
-## KServe
-kserve:
-  enabled: true
-  namespace: modelium-inference
-
-## Monitoring
-monitoring:
-  prometheus:
-    enabled: true
-    retention: 15d
-    storageSize: 50Gi
-  grafana:
-    enabled: true
-    adminPassword: modelium
-    persistence:
-      enabled: true
-      size: 5Gi
-
-## Ingress
+# Ingress configuration
 ingress:
   enabled: true
   className: nginx
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
   hosts:
     - host: modelium.example.com
       paths:
         - path: /
           pathType: Prefix
-          service: frontend-api
-    - host: grafana.modelium.example.com
-      paths:
-        - path: /
-          pathType: Prefix
-          service: grafana
   tls:
     - secretName: modelium-tls
       hosts:
         - modelium.example.com
-        - grafana.modelium.example.com
 
-## Autoscaling
+# Resource requests and limits
+resources:
+  requests:
+    memory: "16Gi"
+    cpu: "4"
+    nvidia.com/gpu: "4"
+  limits:
+    memory: "64Gi"
+    cpu: "16"
+    nvidia.com/gpu: "4"
+
+# Node selector for GPU nodes
+nodeSelector:
+  nvidia.com/gpu: "true"
+
+# Tolerations for GPU taints
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+
+# Affinity rules
+affinity: {}
+
+# Persistent storage for models
+persistence:
+  models:
+    enabled: true
+    storageClass: "fast-ssd"
+    accessMode: ReadWriteMany
+    size: 500Gi
+  logs:
+    enabled: true
+    storageClass: "standard"
+    accessMode: ReadWriteOnce
+    size: 50Gi
+
+# Modelium configuration
+config:
+  organization:
+    id: "production-cluster"
+    name: "Production Cluster"
+  
+  gpu:
+    enabled: true
+    count: null  # Auto-detect
+  
+  modelium_brain:
+    enabled: true
+    model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+    device: "cuda:0"
+    fallback_to_rules: true
+  
+  orchestration:
+    enabled: true
+    mode: "intelligent"
+    decision_interval_seconds: 10
+    model_discovery:
+      watch_directories:
+        - "/models/incoming"
+      scan_interval_seconds: 30
+    policies:
+      evict_after_idle_seconds: 300
+      evict_when_memory_above_percent: 85
+      max_concurrent_loads: 2
+  
+  vllm:
+    enabled: true
+    gpu_memory_utilization: 0.9
+    port: 8000
+  
+  ray_serve:
+    enabled: true
+    num_gpus_per_replica: 1.0
+    port: 8001
+  
+  metrics:
+    enabled: true
+    port: 9090
+
+# Probes configuration
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+
+# Environment variables
+env:
+  - name: LOG_LEVEL
+    value: INFO
+  - name: PYTHONUNBUFFERED
+    value: "1"
+
+# Additional environment from secrets/configmaps
+envFrom: []
+
+# Autoscaling (disabled for GPU workloads)
 autoscaling:
-  enabled: true
-  minReplicas: 1
-  maxReplicas: 10
-  targetCPUUtilizationPercentage: 80
-  targetMemoryUtilizationPercentage: 80
-
-## Security
-securityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
-  seccompProfile:
-    type: RuntimeDefault
-
-## Network Policies
-networkPolicies:
-  enabled: true
-
-## Service Mesh (Istio)
-serviceMesh:
   enabled: false
-  mtls: true
-

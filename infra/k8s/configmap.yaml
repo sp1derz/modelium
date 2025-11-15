@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: modelium-config
+  namespace: modelium
+data:
+  modelium.yaml: |
+    # Modelium Configuration for Kubernetes
+    organization:
+      id: "production-cluster"
+      name: "Production Cluster"
+    
+    # Brain configuration
+    modelium_brain:
+      enabled: true
+      model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+      device: "cuda:0"
+      fallback_to_rules: true
+      max_length: 2048
+      temperature: 0.7
+    
+    # GPU configuration (auto-detect in K8s)
+    gpu:
+      enabled: true
+      count: null  # Auto-detect from nvidia.com/gpu resource
+    
+    # Orchestration
+    orchestration:
+      enabled: true
+      mode: "intelligent"
+      decision_interval_seconds: 10
+      
+      model_discovery:
+        watch_directories:
+          - "/models/incoming"
+        scan_interval_seconds: 30
+        supported_extensions:
+          - ".pt"
+          - ".pth"
+          - ".onnx"
+          - ".safetensors"
+      
+      policies:
+        evict_after_idle_seconds: 300
+        evict_when_memory_above_percent: 85
+        always_loaded: []
+        priority_by_qps: true
+        preload_on_first_request: true
+        max_concurrent_loads: 2
+      
+      fast_loading:
+        enabled: false
+        use_gpu_direct_storage: false
+        nvme_cache_path: "/mnt/nvme/models"
+    
+    # Runtime configurations
+    runtime:
+      default: "auto"
+      overrides: {}
+    
+    vllm:
+      enabled: true
+      gpu_memory_utilization: 0.9
+      port: 8000
+      trust_remote_code: false
+      max_model_len: 4096
+    
+    ray_serve:
+      enabled: true
+      num_replicas: 1
+      num_gpus_per_replica: 1.0
+      port: 8001
+    
+    # Multi-tenancy
+    rate_limiting:
+      enabled: true
+      per_organization:
+        enabled: true
+        default_rpm: 1000
+    
+    usage_tracking:
+      enabled: true
+      track_inference_calls: true
+      track_gpu_hours: true
+      export_to: "prometheus"
+    
+    # Metrics
+    metrics:
+      enabled: true
+      port: 9090
+      export_format: "prometheus"
+

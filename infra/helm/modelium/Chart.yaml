@@ -1,16 +1,27 @@
 apiVersion: v2
 name: modelium
-description: Automated ML model ingestion, conversion, and deployment pipeline
+description: AI-orchestrated multi-model serving platform with intelligent GPU utilization
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
+
 keywords:
-  - machine-learning
+  - ml
+  - ai
+  - gpu
   - inference
-  - model-serving
-  - triton
-  - tensorrt
+  - serving
+  - llm
+  - vllm
+
+home: https://github.com/sp1derz/modelium
+sources:
+  - https://github.com/sp1derz/modelium
+
 maintainers:
   - name: Modelium Team
-    email: team@modelium.ai
+    url: https://github.com/sp1derz/modelium
 
+icon: https://raw.githubusercontent.com/sp1derz/modelium/main/docs/logo.png
+
+dependencies: []
