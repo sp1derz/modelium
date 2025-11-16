@@ -18,10 +18,18 @@ Modelium is an open-source library that automatically discovers, analyzes, and d
 
 ### Option 1: Docker (Recommended)
 
+⚠️ **First**: Build the Docker image - see [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
+
 ```bash
-# Clone and start
+# Clone the repo
 git clone https://github.com/sp1derz/modelium.git
 cd modelium
+
+# Build Docker image (10-15 min, one-time)
+docker build -t modelium:latest .
+
+# Update docker-compose.yml to use local image
+sed -i 's|ghcr.io/sp1derz/modelium:latest|modelium:latest|' docker-compose.yml
 
 # Start with Docker Compose
 docker-compose up -d
@@ -34,8 +42,15 @@ See [DOCKER.md](DOCKER.md) for GPU setup.
 
 ### Option 2: Kubernetes (Production)
 
+⚠️ **First**: Build & push image to registry - see [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
+
 ```bash
-# Deploy with kubectl
+# Build and push to GitHub Container Registry
+docker build -t ghcr.io/sp1derz/modelium:latest .
+echo YOUR_TOKEN | docker login ghcr.io -u sp1derz --password-stdin
+docker push ghcr.io/sp1derz/modelium:latest
+
+# Then deploy with kubectl
 kubectl apply -k infra/k8s/
 
 # Or with Helm

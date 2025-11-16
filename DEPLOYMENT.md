@@ -1,5 +1,18 @@
 # Modelium Deployment Guide
 
+## ⚠️ Important: Build Docker Image First!
+
+For Docker/Kubernetes deployments, you **MUST** build and push the Docker image first:
+
+**See: [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)** for detailed instructions.
+
+**Why?** GitHub Actions can't auto-build due to disk space limits. Choose one:
+1. **Build locally** + push to GitHub Container Registry (for multi-node K8s)
+2. **Build on VM** (for single-node deployments, no registry needed)
+3. **Build + push** to Docker Hub (alternative registry)
+
+---
+
 ## Overview
 
 Modelium can be deployed in multiple ways depending on your infrastructure:
@@ -33,9 +46,11 @@ python -m modelium.cli serve
 
 ### Option B: Docker Compose
 
+⚠️ **First**: Build the image - see [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
+
 ```bash
-# Build image
-docker-compose build
+# Build image (takes 10-15 min)
+docker build -t modelium:latest .
 
 # Start services
 docker-compose up -d
@@ -61,6 +76,9 @@ docker-compose down
 
 ### Setup
 
+⚠️ **Recommended**: Build the image on the VM itself (no registry needed!)  
+See [DOCKER_BUILD_PUSH.md - Option 2](DOCKER_BUILD_PUSH.md#option-2-build-on-cloud-vm-no-registry-needed)
+
 ```bash
 # 1. Install Docker
 curl -fsSL https://get.docker.com | sh
@@ -76,13 +94,21 @@ sudo systemctl restart docker
 # 3. Verify GPU
 docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi
 
-# 4. Clone and configure
+# 4. Clone and build
 git clone https://github.com/sp1derz/modelium.git
 cd modelium
-cp modelium.yaml.example modelium.yaml
-# Edit modelium.yaml
 
-# 5. Start with Docker Compose
+# 5. Build Docker image locally (10-15 min)
+docker build -t modelium:latest .
+
+# 6. Update docker-compose.yml to use local image
+sed -i 's|ghcr.io/sp1derz/modelium:latest|modelium:latest|' docker-compose.yml
+
+# 7. Configure
+cp configs/modelium.yaml.example modelium.yaml
+# Edit modelium.yaml as needed
+
+# 8. Start with Docker Compose
 docker-compose up -d
 
 # 6. Check health
@@ -126,8 +152,23 @@ sudo systemctl status modelium
 - `kubectl` configured
 - NVIDIA GPU Operator installed
 - Storage class for models (NFS, EBS, etc.)
+- ⚠️ **Docker image built and pushed** - See [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
 
 ### Quick Deploy with kubectl
+
+⚠️ **IMPORTANT**: Before deploying, ensure the Docker image exists in the registry!
+
+**Option A**: Build & push to GitHub Container Registry:
+```bash
+# On your local machine or CI:
+docker build -t ghcr.io/sp1derz/modelium:latest .
+echo YOUR_GITHUB_TOKEN | docker login ghcr.io -u sp1derz --password-stdin
+docker push ghcr.io/sp1derz/modelium:latest
+```
+
+**Option B**: Build on a single-node cluster (see [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md))
+
+Then deploy:
 
 ```bash
 # 1. Clone repo
@@ -173,6 +214,8 @@ kubectl get all -n modelium
 ---
 
 ## 4. Helm Deployment (Recommended for Production)
+
+⚠️ **IMPORTANT**: Build & push Docker image first - [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
 
 ### Install Helm Chart
 

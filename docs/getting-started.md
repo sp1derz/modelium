@@ -16,16 +16,19 @@ Choose your deployment method:
    - Fastest setup
    - GPU support included
    - Good for local testing and small production
+   - ⚠️ **Build image first**: See [DOCKER_BUILD_PUSH.md](../DOCKER_BUILD_PUSH.md)
 
 2. **☸️ Kubernetes** (Production) - [DEPLOYMENT.md](../DEPLOYMENT.md)
    - Enterprise-grade
    - Auto-scaling
    - Multi-node support
+   - ⚠️ **Build & push image first**: See [DOCKER_BUILD_PUSH.md](../DOCKER_BUILD_PUSH.md)
 
 3. **🐍 Python CLI** (Development) - Continue below
    - Full control
    - Easy debugging
    - Ideal for development
+   - No Docker image needed ✅
 
 ## Installation (Python CLI)
 

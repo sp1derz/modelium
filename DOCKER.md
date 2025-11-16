@@ -1,5 +1,8 @@
 # Docker Quick Start
 
+> **⚠️ IMPORTANT**: You must build the Docker image yourself first!  
+> GitHub Actions can't auto-build due to disk limits. See [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
+
 > **Note**: The Docker image is ~8-10GB due to CUDA runtime + PyTorch + vLLM dependencies. 
 > This is normal for GPU-accelerated ML workloads. Build time: 10-15 minutes.
 
@@ -21,7 +24,12 @@ curl http://localhost:8000/health
 
 ## Docker Compose (Recommended)
 
+⚠️ **First**: Build the image - see instructions above or [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
+
 ```bash
+# If you built locally:
+sed -i 's|ghcr.io/sp1derz/modelium:latest|modelium:latest|' docker-compose.yml
+
 # Start all services
 docker-compose up -d
 
@@ -203,14 +211,17 @@ Trade-off: More complex, harder to debug.
 
 ## CI/CD Integration
 
-The GitHub Actions workflow automatically:
-1. Builds image on push to main
-2. Tags with commit SHA and `latest`
-3. Pushes to ghcr.io/sp1derz/modelium
+⚠️ **Automatic CD is disabled** - GitHub Actions runners don't have enough disk space for GPU images.
 
-Use in production:
-```bash
-docker pull ghcr.io/sp1derz/modelium:SHA
-docker run --gpus all -p 8000:8000 ghcr.io/sp1derz/modelium:SHA
-```
+**Manual workflow**:
+1. Build locally: `docker build -t ghcr.io/sp1derz/modelium:latest .`
+2. Push to registry: See [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
+3. Deploy: `kubectl set image deployment/modelium-server modelium=ghcr.io/sp1derz/modelium:latest`
+
+Or manually trigger CD workflow:
+- Go to: https://github.com/sp1derz/modelium/actions/workflows/cd.yml
+- Click "Run workflow"
+- Success rate: ~50% (depends on runner disk space)
+
+See [CD_DISABLED.md](CD_DISABLED.md) for full explanation.
 
