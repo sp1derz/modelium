@@ -50,8 +50,15 @@ spec:
       
       containers:
         - name: modelium
-          image: ghcr.io/sp1derz/modelium:latest  # Update with your registry
-          imagePullPolicy: Always
+          # IMPORTANT: Build & push image first!
+          # See CD_DISABLED.md for build instructions
+          # 
+          # Options:
+          # 1. ghcr.io/sp1derz/modelium:latest (if pushed to GitHub registry)
+          # 2. sp1derz/modelium:latest (if pushed to Docker Hub)
+          # 3. modelium:latest (if built locally on this node)
+          image: ghcr.io/sp1derz/modelium:latest
+          imagePullPolicy: Always  # Change to IfNotPresent for local images
           
           ports:
             - name: http
