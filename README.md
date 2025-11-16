@@ -254,6 +254,9 @@ See [configuration examples](configs/) for advanced setups.
 
 **Cloud Support**: AWS (EKS), GCP (GKE), Azure (AKS), on-prem Kubernetes
 
+> **Note**: Automatic CD (Docker builds) disabled due to GitHub Actions disk limits. 
+> Build locally or on cloud VMs. See [CD_DISABLED.md](CD_DISABLED.md) for details.
+
 ## 🤝 Contributing
 
 We welcome contributions! Areas of interest:
@@ -293,7 +296,8 @@ Built with:
 - ✅ Docker & Docker Compose
 - ✅ Kubernetes manifests
 - ✅ Helm chart
-- ✅ CI/CD pipeline (GitHub Actions)
+- ✅ CI pipeline (code validation)
+- ⚠️ CD pipeline (manual trigger only - see [CD_DISABLED.md](CD_DISABLED.md))
 
 **Coming Soon**:
 - ⏳ Prometheus metrics export
