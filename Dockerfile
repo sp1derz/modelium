@@ -1,6 +1,6 @@
 # Multi-stage build for Modelium server
 # Using latest stable CUDA 12.6 with Ubuntu 24.04 (Nov 2025)
-FROM nvidia/cuda:12.6.3-cudnn9-runtime-ubuntu22.04 AS base
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04 AS base
 
 # Install system dependencies including Python 3.12
 RUN apt-get update && apt-get install -y \
@@ -16,6 +16,9 @@ RUN apt-get update && apt-get install -y \
 # Set Python 3.12 as default
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+
+# Remove PEP 668 restriction (safe in Docker, not on host OS)
+RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 
 # Upgrade pip to latest
 RUN python -m pip install --upgrade pip setuptools wheel
