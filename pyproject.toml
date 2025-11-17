@@ -12,30 +12,30 @@ keywords = ["ml", "model-serving", "triton", "tensorrt", "kubernetes"]
 [tool.poetry.dependencies]
 python = "^3.12"
 # Core dependencies - Latest stable versions (Nov 2025)
-pydantic = "^2.10.0"
+pydantic = "^2.9.0"
 pyyaml = "^6.0.2"
-torch = "^2.7.0"
-onnx = "^1.18.0"
-numpy = "^2.2.0"
+torch = "^2.5.0"
+onnx = "^1.17.0"
+numpy = "^2.1.0"
 # CLI
-typer = "^0.15.0"
+typer = "^0.12.0"
 rich = "^13.9.0"
 # API Server
 fastapi = "^0.115.0"
-uvicorn = {extras = ["standard"], version = "^0.34.0"}
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
 # Optional dependencies (for extras)
 # Note: vLLM should be installed separately: pip install vllm
-transformers = {version = "^4.56.0", optional = true}
-ray = {version = "^2.40.0", optional = true}
-aiohttp = {version = "^3.11.0", optional = true}
-tensorrt = {version = "^10.7.0", optional = true}
-pycuda = {version = "^2024.1.2", optional = true}
-tritonclient = {version = "^2.53.0", optional = true}
+transformers = {version = "^4.46.0", optional = true}
+ray = {version = "^2.39.0", optional = true}
+aiohttp = {version = "^3.10.0", optional = true}
+tensorrt = {version = "^10.6.0", optional = true}
+pycuda = {version = "^2024.1", optional = true}
+tritonclient = {version = "^2.50.0", optional = true}
 boto3 = {version = "^1.35.0", optional = true}
 google-cloud-storage = {version = "^2.18.0", optional = true}
-azure-storage-blob = {version = "^12.24.0", optional = true}
-kubernetes = {version = "^31.0.0", optional = true}
-docker = {version = "^7.2.0", optional = true}
+azure-storage-blob = {version = "^12.23.0", optional = true}
+kubernetes = {version = "^30.1.0", optional = true}
+docker = {version = "^7.1.0", optional = true}
 
 [tool.poetry.extras]
 # Optional runtime dependencies (vLLM installed separately)
