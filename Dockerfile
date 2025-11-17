@@ -1,6 +1,6 @@
 # Multi-stage build for Modelium server
 # Using latest stable CUDA 12.6 with Ubuntu 24.04 (Nov 2025)
-FROM nvidia/cuda:12.6.3-cudnn9-runtime-ubuntu24.04 AS base
+FROM nvidia/cuda:12.6.3-cudnn9-runtime-ubuntu22.04 AS base
 
 # Install system dependencies including Python 3.12
 RUN apt-get update && apt-get install -y \
