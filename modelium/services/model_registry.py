@@ -162,7 +162,7 @@ class ModelRegistry:
                 "total_models": len(self._models),
                 "loaded": len(self.get_loaded_models()),
                 "unloaded": len(self.get_unloaded_models()),
-                "discovering": len(self.list_models(ModelStatus.DISCOVERING)),
+                "discovered": len(self.list_models(ModelStatus.DISCOVERED)),
                 "loading": len(self.list_models(ModelStatus.LOADING)),
                 "errors": len(self.list_models(ModelStatus.ERROR)),
             }
