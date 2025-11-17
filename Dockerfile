@@ -20,8 +20,8 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 # Remove PEP 668 restriction (safe in Docker, not on host OS)
 RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 
-# Upgrade pip to latest
-RUN python -m pip install --upgrade pip setuptools wheel
+# Upgrade pip to latest (--ignore-installed to avoid conflict with Debian packages)
+RUN python -m pip install --upgrade --ignore-installed pip setuptools wheel
 
 WORKDIR /app
 
