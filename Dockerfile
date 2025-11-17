@@ -64,8 +64,8 @@ EXPOSE 8000 9090
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Create non-root user for security
-RUN useradd -m -u 1000 modelium && \
+# Create non-root user for security (UID 10000 to avoid conflicts)
+RUN useradd -m -u 10000 modelium && \
     chown -R modelium:modelium /app /models
 
 USER modelium
