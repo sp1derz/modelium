@@ -20,9 +20,9 @@ console = Console()
 
 @app.command()
 def serve(
-    config: Path = typer.Option("modelium.yaml", help="Path to config file"),
-    host: str = typer.Option("0.0.0.0", help="Host to bind to"),
-    port: int = typer.Option(8000, help="Port to bind to"),
+    config: Path = typer.Option("modelium.yaml", "--config", help="Path to config file"),
+    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to"),
+    port: int = typer.Option(8000, "--port", help="Port to bind to"),
 ):
     """Start the Modelium server."""
     
