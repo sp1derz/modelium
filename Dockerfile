@@ -1,31 +1,34 @@
 # Multi-stage build for Modelium server
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04 AS base
+# Using latest stable CUDA 12.6 with Ubuntu 24.04 (Nov 2025)
+FROM nvidia/cuda:12.6.3-cudnn9-runtime-ubuntu24.04 AS base
 
-# Install system dependencies
+# Install system dependencies including Python 3.12
 RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3.11-dev \
+    python3.12 \
+    python3.12-dev \
     python3-pip \
+    python3.12-venv \
     git \
     curl \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+# Set Python 3.12 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 
-# Upgrade pip
-RUN python -m pip install --upgrade pip
+# Upgrade pip to latest
+RUN python -m pip install --upgrade pip setuptools wheel
 
 WORKDIR /app
 
 # Copy dependency files
 COPY pyproject.toml README.md ./
 
-# Install Poetry and dependencies
-RUN pip install poetry==1.7.0 && \
+# Install Poetry 1.8.0 (latest) and dependencies
+RUN pip install poetry==1.8.5 && \
     poetry config virtualenvs.create false && \
-    poetry install --no-dev --no-interaction --no-ansi && \
+    poetry install --no-dev --extras all --no-interaction --no-ansi && \
     # Clean up Poetry cache to save space
     poetry cache clear pypi --all -n && \
     poetry cache clear _default_cache --all -n && \
@@ -34,9 +37,9 @@ RUN pip install poetry==1.7.0 && \
     # Clean up apt cache
     rm -rf /var/lib/apt/lists/* && \
     # Remove build artifacts
-    find /usr/local/lib/python3.11 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/python3.11 -type f -name '*.pyc' -delete && \
-    find /usr/local/lib/python3.11 -type f -name '*.pyo' -delete
+    find /usr/local/lib/python3.12 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib/python3.12 -type f -name '*.pyc' -delete && \
+    find /usr/local/lib/python3.12 -type f -name '*.pyo' -delete
 
 # Copy application code
 COPY modelium/ ./modelium/
