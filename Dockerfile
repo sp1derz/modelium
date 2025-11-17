@@ -70,7 +70,6 @@ RUN useradd -m -u 10000 modelium && \
 
 USER modelium
 
-# Default command (use entrypoint for better arg handling)
-ENTRYPOINT ["python", "-m", "modelium.cli"]
-CMD ["serve", "--host=0.0.0.0", "--port=8000"]
+# Default command (space-separated format for Typer)
+CMD ["python", "-m", "modelium.cli", "serve", "--host", "0.0.0.0", "--port", "8000"]
 
