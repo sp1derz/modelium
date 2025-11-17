@@ -28,21 +28,21 @@ WORKDIR /app
 # Copy dependency files
 COPY pyproject.toml README.md ./
 
-# Install Poetry 1.8.0 (latest) and dependencies
-RUN pip install poetry==1.8.5 && \
-    poetry config virtualenvs.create false && \
-    poetry install --no-dev --extras all --no-interaction --no-ansi && \
-    # Clean up Poetry cache to save space
-    poetry cache clear pypi --all -n && \
-    poetry cache clear _default_cache --all -n && \
-    # Remove pip cache
-    pip cache purge && \
-    # Clean up apt cache
+# Install Poetry 1.8.5 (latest)
+RUN pip install poetry==1.8.5
+
+# Configure Poetry and install dependencies
+RUN poetry config virtualenvs.create false && \
+    poetry install --no-dev --extras all --no-interaction --no-ansi
+
+# Clean up to save space (separate step so install errors aren't hidden)
+RUN poetry cache clear pypi --all -n || true && \
+    poetry cache clear _default_cache --all -n || true && \
+    pip cache purge || true && \
     rm -rf /var/lib/apt/lists/* && \
-    # Remove build artifacts
     find /usr/local/lib/python3.12 -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/python3.12 -type f -name '*.pyc' -delete && \
-    find /usr/local/lib/python3.12 -type f -name '*.pyo' -delete
+    find /usr/local/lib/python3.12 -type f -name '*.pyc' -delete 2>/dev/null || true && \
+    find /usr/local/lib/python3.12 -type f -name '*.pyo' -delete 2>/dev/null || true
 
 # Copy application code
 COPY modelium/ ./modelium/
