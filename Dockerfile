@@ -31,9 +31,9 @@ COPY pyproject.toml README.md ./
 # Install Poetry 1.8.5 (latest)
 RUN pip install poetry==1.8.5
 
-# Configure Poetry and install dependencies
+# Configure Poetry and install dependencies (using --only main instead of deprecated --no-dev)
 RUN poetry config virtualenvs.create false && \
-    poetry install --no-dev --extras all --no-interaction --no-ansi
+    poetry install --only main --extras all --no-interaction --no-ansi
 
 # Clean up to save space (separate step so install errors aren't hidden)
 RUN poetry cache clear pypi --all -n || true && \
