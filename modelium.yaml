@@ -251,7 +251,6 @@ orchestration:
   model_discovery:
     watch_directories: 
       - "/models/incoming"
-      - "/models/huggingface"
     auto_register: true
     scan_interval_seconds: 30
     supported_formats: [".pt", ".pth", ".onnx", ".safetensors", ".bin"]
