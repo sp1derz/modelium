@@ -347,6 +347,13 @@ class Orchestrator:
             
             try:
                 logger.info(f"   📞 Calling runtime_manager.load_model()...")
+                logger.info(f"   📋 Load parameters:")
+                logger.info(f"      - model_name: {model_name}")
+                logger.info(f"      - model_path: {path}")
+                logger.info(f"      - runtime: {runtime}")
+                logger.info(f"      - gpu_id: {gpu_id}")
+                logger.info(f"      - path.exists(): {path.exists()}")
+                
                 success = self.runtime_manager.load_model(
                     model_name=model_name,
                     model_path=path,
@@ -370,15 +377,17 @@ class Orchestrator:
                 else:
                     logger.error(f"   ❌ load_model() returned False for {model_name}")
                     logger.error(f"   Model path: {path}")
+                    logger.error(f"   Path exists: {path.exists()}")
                     logger.error(f"   Runtime: {runtime}")
                     logger.error(f"   GPU: {gpu_id}")
                     logger.error(f"   ⚠️  Check RuntimeManager logs above for detailed error messages")
+                    logger.error(f"   ⚠️  Check modelium.log for full traceback")
                     # Keep GPU assigned even on error (for debugging)
                     self.registry.update_model(
                         model_name, 
                         status=ModelStatus.ERROR,
                         target_gpu=gpu_id,  # Keep GPU visible
-                        error=f"Failed to load with {runtime} (check logs)"
+                        error=f"Failed to load with {runtime} (check logs for details)"
                     )
                     logger.error(f"   ❌ Registry updated: {model_name} -> ERROR")
                     self.metrics.record_model_load(runtime, "error")
