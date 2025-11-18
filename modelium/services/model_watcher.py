@@ -159,9 +159,11 @@ class ModelWatcher:
         # Trigger callback (orchestrator expects directory path)
         if self.on_model_discovered:
             try:
+                logger.info(f"   🔔 Calling orchestrator callback for {model_name}...")
                 self.on_model_discovered(model_name, dir_str)
+                logger.info(f"   ✅ Orchestrator callback completed for {model_name}")
             except Exception as e:
-                logger.error(f"Error in model discovered callback: {e}")
+                logger.error(f"   ❌ Error in model discovered callback for {model_name}: {e}", exc_info=True)
     
     def _process_file(self, file_path: Path):
         """Process a discovered model file (e.g., .pt, .onnx)."""
@@ -189,9 +191,11 @@ class ModelWatcher:
         # Trigger callback
         if self.on_model_discovered:
             try:
+                logger.info(f"   🔔 Calling orchestrator callback for {model_name}...")
                 self.on_model_discovered(model_name, file_str)
+                logger.info(f"   ✅ Orchestrator callback completed for {model_name}")
             except Exception as e:
-                logger.error(f"Error in model discovered callback: {e}")
+                logger.error(f"   ❌ Error in model discovered callback for {model_name}: {e}", exc_info=True)
     
     def _analyze_model(self, model_name: str, file_path: str):
         """Analyze a model file (runs in background thread)."""

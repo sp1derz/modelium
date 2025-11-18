@@ -220,15 +220,18 @@ class Orchestrator:
             model_name: Name of discovered model
             model_path: Path to model directory
         """
-        logger.info(f"📋 New model discovered: {model_name}")
+        logger.info(f"📋 New model discovered: {model_name} at {model_path}")
         
         try:
-            path = Path(model_path)
+            path = Path(model_path).resolve()  # Resolve to absolute path
             
             # 1. ANALYZE: Read config.json
-            if not (path / "config.json").exists():
-                logger.warning(f"   ⚠️  No config.json found, skipping")
+            config_path = path / "config.json"
+            if not config_path.exists():
+                logger.warning(f"   ⚠️  No config.json found at {config_path}, skipping")
                 return
+            
+            logger.info(f"   ✅ Found config.json at {config_path}")
             
             logger.info(f"   Analyzing model...")
             analysis = self.analyzer.analyze(path)
@@ -252,10 +255,17 @@ class Orchestrator:
             runtime = self._choose_runtime(analysis)
             logger.info(f"   🎯 Brain decision: {runtime}")
             
-            # Register in registry
-            self.registry.register_model(
-                name=model_name,
-                path=str(path),
+            # Register in registry (if not already registered by watcher)
+            existing_model = self.registry.get_model(model_name)
+            if not existing_model:
+                self.registry.register_model(
+                    name=model_name,
+                    path=str(path),
+                )
+            
+            # Update with analysis results
+            self.registry.update_model(
+                model_name,
                 framework="pytorch",
                 model_type=analysis.model_type.value if analysis.model_type else "unknown",
                 runtime=runtime,
