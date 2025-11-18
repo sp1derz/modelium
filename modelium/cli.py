@@ -79,6 +79,20 @@ def serve(
         console.print("Press Ctrl+C to stop")
         console.print()
         
+        # Set up logging to file
+        import logging
+        log_file = Path("modelium.log")
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler()  # Also log to console
+            ]
+        )
+        console.print(f"📝 Logs will be written to: {log_file.absolute()}")
+        console.print()
+        
         # Initialize services
         console.print("🔧 Initializing services...")
         from modelium.services.model_registry import ModelRegistry

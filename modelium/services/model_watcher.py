@@ -132,8 +132,20 @@ class ModelWatcher:
         """Process a discovered model directory (e.g., HuggingFace model)."""
         dir_str = str(dir_path)
         
-        # Skip if already seen
+        # Skip if already seen (but log it)
         if dir_str in self._seen_files:
+            logger.debug(f"   ⏭️  Skipping {model_name} (already processed)")
+            # Check if model is still unloaded - if so, trigger callback again
+            existing_model = self.registry.get_model(model_name)
+            if existing_model and existing_model.status.value == "unloaded":
+                logger.info(f"   🔄 Model {model_name} is unloaded, triggering callback again...")
+                if self.on_model_discovered:
+                    try:
+                        logger.info(f"   🔔 Re-triggering orchestrator callback for {model_name}...")
+                        self.on_model_discovered(model_name, dir_str)
+                        logger.info(f"   ✅ Re-trigger callback completed for {model_name}")
+                    except Exception as e:
+                        logger.error(f"   ❌ Error in re-trigger callback: {e}", exc_info=True)
             return
         
         self._seen_files.add(dir_str)
