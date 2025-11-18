@@ -575,11 +575,16 @@ for i in {1..40}; do
     fi
     
     echo "  Status: $MODEL_STATUS, Runtime: $MODEL_RUNTIME (attempt $i/40)"
-    if [ "$MODEL_RUNTIME" = "null" ] && [ $i -gt 5 ]; then
-        echo "  ⚠️  Runtime still null after $((i*5)) seconds - orchestrator may not be working"
-        echo "  Checking if orchestrator callback is registered..."
-        if [ -f "modelium_test.log" ]; then
-            grep -i "orchestrator\|on_model_discovered" modelium_test.log | tail -3 || echo "    (no orchestrator activity found)"
+    if [ "$MODEL_STATUS" = "unloaded" ] && [ $i -gt 5 ]; then
+        if [ $i -eq 10 ] || [ $i -eq 20 ] || [ $i -eq 30 ]; then
+            echo "  ⚠️  Model still unloaded after $((i*5)) seconds"
+            echo "  Checking server logs for errors..."
+            if [ -f "modelium_test.log" ]; then
+                echo "  Recent errors:"
+                tail -100 modelium_test.log | grep -i "error\|failed\|exception\|vllm\|traceback" | tail -10 || echo "    (no errors found)"
+                echo "  Orchestrator activity:"
+                tail -100 modelium_test.log | grep -i "orchestrator\|on_model_discovered\|brain decision\|loading model\|spawning" | tail -5 || echo "    (no orchestrator activity found)"
+            fi
         fi
     fi
     sleep 5
