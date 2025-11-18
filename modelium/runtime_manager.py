@@ -1027,10 +1027,19 @@ max_batch_size: 32
                 return resp.json()
             
         except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
             self.logger.error(f"   ❌ Inference failed with exception: {e}")
             self.logger.error(f"   Exception type: {type(e)}")
             self.logger.error(f"   Exception args: {e.args}")
-            import traceback
-            self.logger.error(f"   Full traceback:\n{traceback.format_exc()}")
-            return {"error": str(e), "error_type": type(e).__name__, "traceback": traceback.format_exc()}
+            self.logger.error(f"   Full traceback:\n{error_traceback}")
+            return {
+                "error": str(e), 
+                "error_type": type(e).__name__, 
+                "traceback": error_traceback
+            }
+        
+        # Safety: ensure we always return a dict
+        self.logger.error(f"   ❌ Inference method reached end without returning (should never happen)")
+        return {"error": "Inference method did not return a result"}
 
