@@ -773,8 +773,9 @@ max_batch_size: 32
                         self.logger.error(f"Traceback: {traceback.format_exc()}")
                         raise
                 
-                def __call__(self, request):
+                async def __call__(self, request):
                     import torch
+                    import json
                     
                     # Ray Serve can pass request in different formats
                     # Handle dict, Starlette Request, or raw body
@@ -784,30 +785,38 @@ max_batch_size: 32
                         # Most common case - Ray Serve auto-parses JSON to dict
                         request_dict = request
                     elif hasattr(request, "json"):  # Starlette Request object
-                        # Try to get JSON body from Request object
+                        # Starlette Request - need to await json() method
                         try:
-                            import json
-                            if hasattr(request, "body"):
-                                # Read body and parse JSON
-                                body = request.body
-                                if isinstance(body, bytes):
-                                    body = body.decode('utf-8')
-                                request_dict = json.loads(body) if body else {}
+                            # Try to get JSON body (async method)
+                            if callable(request.json):
+                                # Check if it's a coroutine
+                                import inspect
+                                if inspect.iscoroutinefunction(request.json):
+                                    request_dict = await request.json()
+                                else:
+                                    # Sync method
+                                    request_dict = request.json()
                             elif hasattr(request, "_json"):
+                                # Cached parsed JSON
                                 request_dict = request._json
                             else:
-                                # Try calling json() if it's a method
-                                if callable(request.json):
-                                    # This might be async, but Ray Serve should handle it
-                                    # For now, try to get body directly
-                                    request_dict = {}
+                                # Try to read body directly
+                                if hasattr(request, "body"):
+                                    body = request.body
+                                    if hasattr(body, "__await__"):
+                                        body = await body
+                                    if isinstance(body, bytes):
+                                        body = body.decode('utf-8')
+                                    if isinstance(body, str) and body:
+                                        request_dict = json.loads(body)
                         except Exception as e:
-                            self.logger.warning(f"Could not parse Request object: {e}")
+                            self.logger.error(f"Could not parse Request object: {e}")
+                            import traceback
+                            self.logger.error(f"Traceback: {traceback.format_exc()}")
                             request_dict = {}
                     elif isinstance(request, str):
                         # Raw JSON string
                         try:
-                            import json
                             request_dict = json.loads(request)
                         except:
                             request_dict = {}
