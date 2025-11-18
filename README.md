@@ -166,6 +166,35 @@ curl -X POST http://localhost:8000/predict/gpt2-model \
   }' | jq
 ```
 
+## 🧪 Testing
+
+### Automated Testing
+
+We provide comprehensive test scripts for both virtual environment and Docker:
+
+```bash
+# Option 1: Test with virtual environment (5-10 minutes)
+chmod +x test_modelium_venv.sh
+./test_modelium_venv.sh
+
+# Option 2: Test with Docker (15-20 minutes first time)
+chmod +x test_modelium_docker.sh
+./test_modelium_docker.sh
+```
+
+**What gets tested:**
+- ✅ Installation & setup
+- ✅ Server startup & health checks
+- ✅ Model detection & loading (GPT-2)
+- ✅ Inference with real requests
+- ✅ Prometheus metrics
+- ✅ Load testing (10 concurrent requests)
+- ✅ Intelligent orchestration (QPS tracking, idle detection)
+
+### Manual Testing
+
+See [TESTING_GUIDE.md](TESTING_GUIDE.md) for complete manual testing instructions, troubleshooting, and performance testing.
+
 ## 📖 Documentation
 
 - **[Getting Started](docs/getting-started.md)** - Complete installation guide
