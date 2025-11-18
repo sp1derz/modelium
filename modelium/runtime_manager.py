@@ -717,11 +717,21 @@ max_batch_size: 32
                 self.logger.warning(f"   ⚠️  Ray Serve may already be running: {e}")
             
             # GPT-2 deployment with actual model loading
+            # Ray Serve will automatically assign a GPU when num_gpus > 0
+            # We use CUDA_VISIBLE_DEVICES to limit which GPU Ray can see
+            import os
+            ray_env = {}
+            if gpu_id >= 0 and torch.cuda.is_available():
+                # Set CUDA_VISIBLE_DEVICES so Ray only sees the GPU we want
+                ray_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+                self.logger.info(f"   Setting CUDA_VISIBLE_DEVICES={gpu_id} for Ray actor")
+            
             @serve.deployment(
                 name=model_name,
                 ray_actor_options={
                     "num_gpus": 1 if gpu_id >= 0 else 0,
-                    "num_cpus": 2
+                    "num_cpus": 2,
+                    "runtime_env": {"env_vars": ray_env} if ray_env else {}
                 },
                 num_replicas=1,
             )
@@ -734,9 +744,16 @@ max_batch_size: 32
                     self.logger = logging.getLogger(f"RayServe.{model_name}")
                     self.logger.info(f"Loading GPT-2 model from {model_path}...")
                     
-                    # Set CUDA device if GPU available
-                    self.device = f"cuda:{gpu_id}" if torch.cuda.is_available() and gpu_id >= 0 else "cpu"
-                    self.logger.info(f"Using device: {self.device}")
+                    # Ray Serve automatically assigns GPU when num_gpus > 0
+                    # Use the first available CUDA device (Ray handles assignment)
+                    if torch.cuda.is_available():
+                        # Ray Serve assigns GPU automatically, use cuda:0 (Ray's assigned GPU)
+                        self.device = "cuda:0"
+                        self.logger.info(f"Using GPU (Ray-assigned): {self.device}")
+                        self.logger.info(f"Available GPUs: {torch.cuda.device_count()}")
+                    else:
+                        self.device = "cpu"
+                        self.logger.info(f"Using CPU (no GPU available)")
                     
                     # Load model and tokenizer
                     try:
@@ -747,6 +764,8 @@ max_batch_size: 32
                         self.logger.info(f"✅ GPT-2 model loaded successfully on {self.device}")
                     except Exception as e:
                         self.logger.error(f"❌ Failed to load model: {e}")
+                        import traceback
+                        self.logger.error(f"Traceback: {traceback.format_exc()}")
                         raise
                 
                 def __call__(self, request: dict):
