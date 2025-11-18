@@ -713,18 +713,23 @@ max_batch_size: 32
                 # vLLM might use the model path or a derived name
                 actual_model_name = info.get("vllm_model_name", model_name)
                 
-                # Try to get model list from vLLM to find the correct model identifier
+                # ALWAYS query vLLM's /v1/models to get the exact model identifier
+                # This ensures we use the correct name that vLLM expects
                 try:
+                    self.logger.debug(f"   Querying vLLM /v1/models to get exact model identifier...")
                     models_resp = requests.get(f"{endpoint}/v1/models", timeout=5)
                     if models_resp.status_code == 200:
                         models_data = models_resp.json()
                         if "data" in models_data and len(models_data["data"]) > 0:
-                            # Use the first available model's id
+                            # Use the first available model's id (this is what vLLM expects)
                             actual_model_name = models_data["data"][0].get("id", model_name)
-                            self.logger.debug(f"Using vLLM model name: {actual_model_name}")
-                except:
-                    # If we can't query models, use stored name or fallback
-                    pass
+                            self.logger.info(f"   ✅ Using vLLM model identifier: {actual_model_name}")
+                        else:
+                            self.logger.warning(f"   ⚠️  vLLM /v1/models returned no models, using stored: {actual_model_name}")
+                    else:
+                        self.logger.warning(f"   ⚠️  vLLM /v1/models returned {models_resp.status_code}, using stored: {actual_model_name}")
+                except Exception as e:
+                    self.logger.warning(f"   ⚠️  Could not query vLLM /v1/models: {e}, using stored: {actual_model_name}")
                 
             # Try /v1/chat/completions first (preferred in vLLM 0.10+)
             chat_completions_tried = False
