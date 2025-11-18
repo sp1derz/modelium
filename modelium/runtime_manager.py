@@ -276,10 +276,18 @@ class RuntimeManager:
                 "CUDA_VISIBLE_DEVICES": str(gpu_id)
             }
             
-            self.logger.info(f"   Spawning vLLM on port {port}, GPU {gpu_id}")
+            self.logger.info(f"")
+            self.logger.info(f"=" * 60)
+            self.logger.info(f"🚀 SPAWNING vLLM PROCESS")
+            self.logger.info(f"   Model: {model_name}")
+            self.logger.info(f"   Path: {model_path}")
+            self.logger.info(f"   Port: {port}")
+            self.logger.info(f"   GPU: {gpu_id}")
+            self.logger.info(f"=" * 60)
             
             # Spawn process with stderr redirected to capture errors
             self.logger.info(f"   Command: {' '.join(cmd)}")
+            self.logger.info(f"   Environment: CUDA_VISIBLE_DEVICES={gpu_id}")
             
             # Use a temporary file to capture stderr (avoids buffer issues)
             import tempfile
@@ -288,6 +296,7 @@ class RuntimeManager:
             stderr_file.close()
             
             try:
+                self.logger.info(f"   📝 Starting subprocess...")
                 process = subprocess.Popen(
                     cmd,
                     env=env,
@@ -297,9 +306,29 @@ class RuntimeManager:
                     text=True
                 )
                 
+                self.logger.info(f"   ✅ Process spawned! PID: {process.pid}")
+                self.logger.info(f"   📋 vLLM stderr log: {stderr_path}")
+                self.logger.info(f"   ⏳ Waiting for vLLM to be ready (max 180s)...")
+                
+                # Wait a moment to see if it crashes immediately
+                time.sleep(1)
+                if process.poll() is not None:
+                    self.logger.error(f"   ❌ Process died immediately with code {process.returncode}")
+                    # Read stderr immediately
+                    try:
+                        with open(stderr_path, 'r') as f:
+                            stderr_output = f.read()
+                            if stderr_output:
+                                self.logger.error(f"   vLLM stderr (immediate failure):")
+                                for line in stderr_output.strip().split('\n'):
+                                    if line.strip():
+                                        self.logger.error(f"      {line}")
+                    except:
+                        pass
+                    return False
+                
                 # Wait for ready
-                self.logger.info(f"   Waiting for vLLM to start (PID: {process.pid})...")
-                self.logger.info(f"   vLLM stderr log: {stderr_path}")
+                self.logger.info(f"   Process is running, waiting for health check...")
                 if self._wait_for_vllm_ready(port, timeout=180, process=process, stderr_path=stderr_path):
                     # Get actual model name from vLLM (might be different from our model_name)
                     vllm_model_name = model_name
