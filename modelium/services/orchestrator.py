@@ -379,11 +379,13 @@ class Orchestrator:
         Choose best runtime based on model analysis and enabled runtimes.
         
         Simple rules:
-        - LLMs (GPT, Llama, Mistral, etc.) → vLLM if enabled
+        - GPT-2 → Ray Serve (vLLM doesn't support GPT-2 OpenAI API)
+        - Modern LLMs (Llama, Mistral, Qwen, etc.) → vLLM if enabled
         - Vision/Other → Ray if enabled
         - Fallback to whatever is enabled
         """
         arch = (analysis.architecture or "").lower()
+        model_name = (analysis.model_name or "").lower()
         
         # Check what's enabled
         enabled_runtimes = []
@@ -394,11 +396,30 @@ class Orchestrator:
         if self.config.ray_serve.enabled:
             enabled_runtimes.append("ray")
         
-        # LLM architectures
-        llm_keywords = ["gpt", "llama", "mistral", "qwen", "falcon", "bloom", "opt"]
-        is_llm = any(k in arch for k in llm_keywords)
+        # CRITICAL: GPT-2 doesn't work with vLLM OpenAI API endpoints
+        # Route GPT-2 to Ray Serve instead
+        is_gpt2 = (
+            "gpt2" in arch or 
+            "gpt2" in model_name or
+            arch == "gpt2" or
+            model_name == "gpt2"
+        )
         
-        if is_llm and "vllm" in enabled_runtimes:
+        if is_gpt2:
+            if "ray" in enabled_runtimes:
+                logger.info(f"   🎯 GPT-2 detected → Routing to Ray Serve (vLLM doesn't support GPT-2 OpenAI API)")
+                return "ray"
+            elif "triton" in enabled_runtimes:
+                logger.info(f"   🎯 GPT-2 detected → Routing to Triton (vLLM doesn't support GPT-2 OpenAI API)")
+                return "triton"
+            else:
+                logger.warning(f"   ⚠️  GPT-2 detected but Ray/Triton not enabled. vLLM may not work!")
+        
+        # Modern LLM architectures (but NOT GPT-2)
+        llm_keywords = ["llama", "mistral", "qwen", "falcon", "bloom", "opt", "gpt-3", "gpt-4", "gpt3", "gpt4"]
+        is_modern_llm = any(k in arch for k in llm_keywords)
+        
+        if is_modern_llm and "vllm" in enabled_runtimes:
             return "vllm"
         
         if "ray" in enabled_runtimes:

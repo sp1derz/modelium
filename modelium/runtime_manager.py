@@ -1060,11 +1060,20 @@ max_batch_size: 32
                 except:
                     pass
                 
+                # Check if this is GPT-2
+                is_gpt2 = "gpt2" in actual_model_name.lower() or "gpt2" in model_name.lower()
+                
                 # Return detailed error
                 error_detail = f"vLLM inference failed: Model '{actual_model_name}' does not support Completions or Chat Completions API"
                 self.logger.error(f"   ❌ {error_detail}")
-                self.logger.error(f"   💡 Suggestion: GPT-2 may not be fully supported in vLLM 0.11+")
-                self.logger.error(f"   💡 Alternative: Try using Ray Serve for GPT-2 models")
+                
+                if is_gpt2:
+                    self.logger.error(f"   💡 GPT-2 is NOT supported by vLLM OpenAI API endpoints")
+                    self.logger.error(f"   💡 SOLUTION: Restart Modelium - GPT-2 will be automatically routed to Ray Serve")
+                    self.logger.error(f"   💡 Make sure Ray Serve is enabled in modelium.yaml")
+                else:
+                    self.logger.error(f"   💡 Suggestion: Model may not be fully supported in vLLM 0.11+")
+                    self.logger.error(f"   💡 Alternative: Try using Ray Serve for this model")
                 self.logger.error(f"   💡 Check vLLM logs at /tmp/modelium_vllm_logs/ for details")
                 
                 return {
@@ -1072,8 +1081,9 @@ max_batch_size: 32
                     "model": actual_model_name,
                     "tried_names": model_names_to_try,
                     "endpoint": endpoint,
-                    "suggestion": "GPT-2 may not be fully supported in vLLM. Consider using Ray Serve for GPT-2 models, or try a different model like GPT-2-medium or GPT-2-large.",
-                    "vllm_logs": "/tmp/modelium_vllm_logs/"
+                    "suggestion": "GPT-2 is not supported by vLLM. Restart Modelium - it will automatically route GPT-2 to Ray Serve." if is_gpt2 else "Model may not be fully supported in vLLM. Consider using Ray Serve.",
+                    "vllm_logs": "/tmp/modelium_vllm_logs/",
+                    "is_gpt2": is_gpt2
                 }
             
             elif runtime == "triton":
