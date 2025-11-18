@@ -79,60 +79,41 @@ def serve(
         console.print("Press Ctrl+C to stop")
         console.print()
         
-        # Initialize runtime connectors
-        console.print("🔧 Connecting to runtimes...")
-        from modelium.connectors import VLLMConnector, TritonConnector, RayConnector
+        # Initialize services
+        console.print("🔧 Initializing services...")
         from modelium.services.model_registry import ModelRegistry
         from modelium.services.model_watcher import ModelWatcher
         from modelium.services.orchestrator import Orchestrator
+        from modelium.runtime_manager import RuntimeManager
+        from modelium.metrics import ModeliumMetrics
         
-        # Initialize connectors for enabled runtimes
-        connectors = {}
-        
-        if cfg.vllm.enabled:
-            console.print(f"   Checking vLLM at {cfg.vllm.endpoint}...")
-            vllm = VLLMConnector(cfg.vllm.endpoint, cfg.vllm.timeout)
-            if vllm.health_check():
-                connectors["vllm"] = vllm
-                console.print(f"   ✅ vLLM connected")
-            else:
-                console.print(f"   ⚠️  vLLM not available (will retry)")
-        
-        if cfg.triton.enabled:
-            console.print(f"   Checking Triton at {cfg.triton.endpoint}...")
-            triton = TritonConnector(cfg.triton.endpoint, cfg.triton.timeout)
-            if triton.health_check():
-                connectors["triton"] = triton
-                console.print(f"   ✅ Triton connected")
-            else:
-                console.print(f"   ⚠️  Triton not available (will retry)")
-        
-        if cfg.ray_serve.enabled:
-            console.print(f"   Checking Ray Serve at {cfg.ray_serve.endpoint}...")
-            ray_serve = RayConnector(cfg.ray_serve.endpoint, cfg.ray_serve.timeout)
-            if ray_serve.health_check():
-                connectors["ray_serve"] = ray_serve
-                console.print(f"   ✅ Ray Serve connected")
-            else:
-                console.print(f"   ⚠️  Ray Serve not available (will retry)")
-        
-        if not connectors:
-            console.print("\n[red]❌ No runtimes available![/red]")
-            console.print("\nStart at least one runtime:")
-            console.print("  vLLM:      docker run --gpus all -p 8001:8000 vllm/vllm-openai:latest --model gpt2")
-            console.print("  Triton:    docker run --gpus all -p 8003:8000 nvcr.io/nvidia/tritonserver:latest")
-            console.print("  Ray Serve: docker run --gpus all -p 8002:8000 rayproject/ray:latest")
+        # Check at least one runtime is enabled
+        if not (cfg.vllm.enabled or cfg.triton.enabled or cfg.ray_serve.enabled):
+            console.print("\n[red]❌ No runtimes enabled in config![/red]")
+            console.print("\nEdit modelium.yaml and enable at least one:")
+            console.print("  vllm.enabled: true")
+            console.print("  triton.enabled: true")
+            console.print("  ray_serve.enabled: true")
             raise typer.Exit(1)
         
-        console.print()
-        
+        # Initialize components
         registry = ModelRegistry()
+        metrics = ModeliumMetrics()
+        runtime_manager = RuntimeManager(cfg)
+        
+        # Start Prometheus metrics server
+        if cfg.metrics.enabled:
+            console.print(f"📊 Starting Prometheus metrics on port {cfg.metrics.port}...")
+            metrics.start_server(cfg.metrics.port)
+        
+        console.print()
         
         # Create orchestrator
         orchestrator = Orchestrator(
             brain=brain if cfg.modelium_brain.enabled else None,
-            connectors=connectors,
+            runtime_manager=runtime_manager,
             registry=registry,
+            metrics=metrics,
             config=cfg,
         )
         
@@ -209,52 +190,28 @@ def serve(
                     detail=f"Model not loaded (status: {model.status.value})"
                 )
             
-            # Record request
+            # Record request for metrics
             registry.record_request(model_name)
+            start_time = time.time()
             
-            # Route to correct runtime based on model's assigned runtime
-            runtime = model.runtime
-            if runtime not in connectors:
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Runtime {runtime} not available"
-                )
-            
-            connector = connectors[runtime]
-            
-            # Run inference based on runtime type
+            # Run inference via RuntimeManager (automatically routes to correct runtime)
             try:
-                if runtime == "vllm":
-                    result = connector.inference(
-                        model=model_name,
-                        prompt=request.prompt,
-                        max_tokens=request.max_tokens,
-                        temperature=request.temperature,
-                    )
-                elif runtime == "triton":
-                    # Triton requires tensor inputs - this is a simplified example
-                    # In production, you'd need proper input preprocessing
-                    result = connector.inference(
-                        model=model_name,
-                        inputs=[{
-                            "name": "INPUT",
-                            "shape": [1],
-                            "datatype": "BYTES",
-                            "data": [request.prompt]
-                        }]
-                    )
-                elif runtime == "ray_serve":
-                    result = connector.predict(
-                        model_name=model_name,
-                        data={"prompt": request.prompt},
-                        max_tokens=request.max_tokens,
-                        temperature=request.temperature,
-                    )
-                else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Unknown runtime: {runtime}"
-                    )
+                result = runtime_manager.inference(
+                    model_name=model_name,
+                    prompt=request.prompt,
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                )
+                
+                # Record metrics
+                latency_ms = (time.time() - start_time) * 1000
+                metrics.record_request(
+                    model=model_name,
+                    runtime=model.runtime,
+                    latency_ms=latency_ms,
+                    status="success" if "error" not in result else "error",
+                    gpu=model.target_gpu
+                )
                 
                 if "error" in result:
                     raise HTTPException(status_code=500, detail=result["error"])
@@ -263,6 +220,14 @@ def serve(
                 
             except Exception as e:
                 console.print(f"[red]Inference error: {e}[/red]")
+                latency_ms = (time.time() - start_time) * 1000
+                metrics.record_request(
+                    model=model_name,
+                    runtime=model.runtime,
+                    latency_ms=latency_ms,
+                    status="error",
+                    gpu=model.target_gpu
+                )
                 raise HTTPException(status_code=500, detail=str(e))
         
         @app.get("/health")

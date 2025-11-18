@@ -239,6 +239,7 @@ class OrchestrationConfig(BaseModel):
 class MetricsConfig(BaseModel):
     """Metrics collection settings."""
     enabled: bool = True
+    port: int = 9090  # Prometheus port
     collection_interval_seconds: int = 10
     retention_hours: int = 24
     exporters: Dict[str, Any] = Field(default_factory=lambda: {
