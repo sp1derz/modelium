@@ -178,7 +178,7 @@ class ExperimentalConfig(BaseModel):
 class ModeliumBrainConfig(BaseModel):
     """Modelium Brain (AI decision engine) settings."""
     enabled: bool = True
-    model_name: str = "modelium/brain-v1"
+    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct"  # Default to Qwen 2.5 1.5B
     device: str = "cuda:0"
     dtype: str = "float16"
     max_new_tokens: int = 2048
@@ -192,7 +192,20 @@ class ModelDiscoveryConfig(BaseModel):
     watch_directories: List[str] = Field(default_factory=lambda: ["/models/incoming"])
     auto_register: bool = True
     scan_interval_seconds: int = 30
-    supported_formats: List[str] = Field(default_factory=lambda: [".pt", ".pth", ".onnx", ".safetensors", ".bin"])
+    # Universal model format support
+    supported_formats: List[str] = Field(default_factory=lambda: [
+        ".pt", ".pth", ".pth.tar",  # PyTorch
+        ".onnx", ".onnx.gz",  # ONNX
+        ".safetensors",  # HuggingFace SafeTensors
+        ".bin",  # Generic binary
+        ".ckpt", ".checkpoint",  # Checkpoints
+        ".pb",  # TensorFlow
+        ".tflite",  # TensorFlow Lite
+        ".h5", ".hdf5",  # Keras/HDF5
+        ".mlmodel",  # Core ML
+        ".engine",  # TensorRT
+        ".plan",  # TensorRT
+    ])
 
 
 class OrchestrationPoliciesConfig(BaseModel):

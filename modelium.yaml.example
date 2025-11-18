@@ -61,7 +61,14 @@ metrics:
   port: 9090  # Prometheus endpoint at http://localhost:9090/metrics
 
 # Modelium Brain (decision making)
+# Uses Qwen 2.5 1.5B for intelligent decisions
 modelium_brain:
-  enabled: true  # Use rule-based decisions
-  fallback_to_rules: true  # Always use rules (LLM brain not yet available)
+  enabled: true
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"  # Default Qwen model
+  device: "cuda:0"
+  dtype: "float16"
+  max_new_tokens: 2048
+  temperature: 0.3
+  timeout_seconds: 5
+  fallback_to_rules: true  # Use rules if LLM fails
 

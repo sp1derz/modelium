@@ -38,7 +38,7 @@ class ModeliumBrain:
     
     def __init__(
         self,
-        model_name: str = "modelium/brain-v1",
+        model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",
         device: str = "cuda:0",
         dtype: str = "float16",
         fallback_to_rules: bool = True,

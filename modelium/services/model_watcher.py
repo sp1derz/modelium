@@ -42,8 +42,19 @@ class ModelWatcher:
         """
         self.watch_directories = [Path(d) for d in watch_directories]
         self.scan_interval = scan_interval
+        # Universal model format support
         self.supported_formats = supported_formats or [
-            ".pt", ".pth", ".onnx", ".safetensors", ".bin"
+            ".pt", ".pth", ".pth.tar",  # PyTorch
+            ".onnx", ".onnx.gz",  # ONNX
+            ".safetensors",  # HuggingFace SafeTensors
+            ".bin",  # Generic binary
+            ".ckpt", ".checkpoint",  # Checkpoints
+            ".pb",  # TensorFlow
+            ".tflite",  # TensorFlow Lite
+            ".h5", ".hdf5",  # Keras/HDF5
+            ".mlmodel",  # Core ML
+            ".engine",  # TensorRT
+            ".plan",  # TensorRT
         ]
         self.on_model_discovered = on_model_discovered
         
@@ -91,9 +102,25 @@ class ModelWatcher:
                 continue
             
             try:
-                for file_path in watch_dir.iterdir():
-                    if file_path.is_file() and self._is_model_file(file_path):
-                        self._process_file(file_path)
+                # Check if watch directory itself is a model (has config.json)
+                if (watch_dir / "config.json").exists():
+                    watch_str = str(watch_dir)
+                    if watch_str not in self._seen_files:
+                        # Use directory name as model name
+                        model_name = watch_dir.name if watch_dir.name else "model"
+                        logger.info(f"📁 Watch directory itself is a model: {model_name} at {watch_dir}")
+                        self._process_directory(watch_dir)
+                
+                # Scan subdirectories and files
+                for item_path in watch_dir.iterdir():
+                    # Check for HuggingFace model subdirectories (have config.json)
+                    if item_path.is_dir() and (item_path / "config.json").exists():
+                        self._process_directory(item_path)
+                    # Check for individual model files (.pt, .onnx, etc.)
+                    elif item_path.is_file() and self._is_model_file(item_path):
+                        # Only process if watch dir itself wasn't already processed
+                        if not (watch_dir / "config.json").exists():
+                            self._process_file(item_path)
             except Exception as e:
                 logger.error(f"Error scanning {watch_dir}: {e}")
     
@@ -101,8 +128,43 @@ class ModelWatcher:
         """Check if file is a supported model format."""
         return path.suffix.lower() in self.supported_formats
     
+    def _process_directory(self, dir_path: Path):
+        """Process a discovered model directory (e.g., HuggingFace model)."""
+        dir_str = str(dir_path)
+        
+        # Skip if already seen
+        if dir_str in self._seen_files:
+            return
+        
+        self._seen_files.add(dir_str)
+        
+        # Use directory name, or "model" if it's the watch directory itself
+        if dir_path.name:
+            model_name = dir_path.name
+        else:
+            model_name = "model"
+        
+        logger.info(f"📁 Discovered model directory: {model_name} at {dir_path}")
+        
+        # Register in registry
+        model = self.registry.register_model(model_name, dir_str)
+        
+        # Analyze model in background
+        threading.Thread(
+            target=self._analyze_model,
+            args=(model_name, dir_str),
+            daemon=True
+        ).start()
+        
+        # Trigger callback (orchestrator expects directory path)
+        if self.on_model_discovered:
+            try:
+                self.on_model_discovered(model_name, dir_str)
+            except Exception as e:
+                logger.error(f"Error in model discovered callback: {e}")
+    
     def _process_file(self, file_path: Path):
-        """Process a discovered model file."""
+        """Process a discovered model file (e.g., .pt, .onnx)."""
         file_str = str(file_path)
         
         # Skip if already seen
@@ -112,7 +174,7 @@ class ModelWatcher:
         self._seen_files.add(file_str)
         model_name = file_path.stem  # filename without extension
         
-        logger.info(f"📁 Discovered model: {model_name} at {file_path}")
+        logger.info(f"📁 Discovered model file: {model_name} at {file_path}")
         
         # Register in registry
         model = self.registry.register_model(model_name, file_str)

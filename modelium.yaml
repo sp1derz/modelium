@@ -217,7 +217,7 @@ modelium_brain:
   enabled: true
   
   # Model location (downloads from HuggingFace automatically)
-  model_name: "modelium/brain-v1"  # Will be published to HF
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"  # Default Qwen model (can be changed to fine-tuned version)
   device: "cuda:0"  # Runs on GPU 0 (only ~2GB VRAM)
   dtype: "float16"
   
@@ -237,7 +237,7 @@ orchestration:
   # Model Discovery - watches these folders for new models
   model_discovery:
     watch_directories: 
-      - "/models/incoming"
+      - "./models/incoming"
     auto_register: true
     scan_interval_seconds: 30
     supported_formats: [".pt", ".pth", ".onnx", ".safetensors", ".bin"]
