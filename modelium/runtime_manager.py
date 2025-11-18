@@ -261,9 +261,10 @@ class RuntimeManager:
             port = self._vllm_next_port
             self._vllm_next_port += 1
             
-            # Build command
+            # Build command - vLLM 0.11+ uses CLI: vllm serve
+            # Try new CLI first, fallback to old module path
             cmd = [
-                "python", "-m", "vllm.entrypoints.openai.api_server",
+                "vllm", "serve",
                 "--model", str(model_path),
                 "--host", "0.0.0.0",
                 "--port", str(port),
