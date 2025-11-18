@@ -840,20 +840,24 @@ max_batch_size: 32
                                 error_data = resp.json()
                                 error_msg = error_data.get("error", {}).get("message", resp.text)
                             except:
-                                error_msg = resp.text
+                                error_msg = resp.text or ""
+                            
+                            # Ensure error_msg is a string
+                            if error_msg is None:
+                                error_msg = ""
                             
                             self.logger.debug(f"   Chat Completions with '{model_name_variant}' returned {resp.status_code}: {error_msg}")
                             
                             # If this model name doesn't work, try next variant
-                            if resp.status_code == 400 and "does not support" not in error_msg.lower():
+                            if resp.status_code == 400 and error_msg and "does not support" not in error_msg.lower():
                                 continue  # Try next model name variant
-                            elif resp.status_code == 400 and "does not support" in error_msg.lower():
+                            elif resp.status_code == 400 and error_msg and "does not support" in error_msg.lower():
                                 # Model doesn't support chat completions at all, break and try completions
                                 break
                     except requests.exceptions.HTTPError as e:
-                        error_msg = str(e)
+                        error_msg = str(e) or ""
                         self.logger.debug(f"   Chat Completions HTTP error with '{model_name_variant}': {error_msg}")
-                        if "does not support" not in error_msg.lower():
+                        if error_msg and "does not support" not in error_msg.lower():
                             continue  # Try next model name variant
                         break
                     except Exception as e:
@@ -889,14 +893,18 @@ max_batch_size: 32
                                 error_data = resp.json()
                                 error_msg = error_data.get("error", {}).get("message", resp.text)
                             except:
-                                error_msg = resp.text
+                                error_msg = resp.text or ""
+                            
+                            # Ensure error_msg is a string
+                            if error_msg is None:
+                                error_msg = ""
                             
                             self.logger.debug(f"   Completions API with '{model_name_variant}' returned {resp.status_code}: {error_msg}")
                             
                             # If this model name doesn't work, try next variant
-                            if resp.status_code == 400 and "does not support" not in error_msg.lower():
+                            if resp.status_code == 400 and error_msg and "does not support" not in error_msg.lower():
                                 continue  # Try next model name variant
-                            elif resp.status_code == 400 and "does not support" in error_msg.lower():
+                            elif resp.status_code == 400 and error_msg and "does not support" in error_msg.lower():
                                 # Model doesn't support completions at all
                                 self.logger.error(f"   ❌ Model '{model_name_variant}' does not support Completions API")
                                 break
@@ -906,10 +914,14 @@ max_batch_size: 32
                             error_data = e.response.json()
                             error_msg = error_data.get("error", {}).get("message", str(e))
                         except:
-                            error_msg = str(e)
+                            error_msg = str(e) or ""
+                        
+                        # Ensure error_msg is a string
+                        if error_msg is None:
+                            error_msg = ""
                         
                         self.logger.debug(f"   Completions HTTP error with '{model_name_variant}': {error_msg}")
-                        if "does not support" not in error_msg.lower():
+                        if error_msg and "does not support" not in error_msg.lower():
                             continue  # Try next model name variant
                         # If we get here, all variants failed
                         if model_name_variant == model_names_to_try[-1]:
