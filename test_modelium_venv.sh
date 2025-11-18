@@ -864,19 +864,90 @@ echo "  QPS: $QPS"
 echo "  Idle seconds: $IDLE_SECONDS"
 echo ""
 
+# Check if brain model is actually loaded in GPU memory
+echo "🔍 Checking if brain (Qwen) model is loaded in GPU memory..."
+if command -v nvidia-smi &>/dev/null; then
+    echo "  Running: nvidia-smi to check loaded models..."
+    GPU_INFO=$(nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null || echo "")
+    
+    if [ ! -z "$GPU_INFO" ]; then
+        echo "  GPU Status:"
+        echo "$GPU_INFO" | while IFS=',' read -r gpu_id gpu_name mem_used mem_total; do
+            echo "    GPU $gpu_id ($gpu_name): ${mem_used}MB / ${mem_total}MB used"
+        done
+        
+        # Check for Python processes with models loaded
+        PYTHON_PROCESSES=$(nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null || echo "")
+        if [ ! -z "$PYTHON_PROCESSES" ]; then
+            echo ""
+            echo "  Processes using GPU:"
+            echo "$PYTHON_PROCESSES" | head -10 | sed 's/^/    /'
+            
+            # Count models (should be at least 2: brain + gpt2)
+            MODEL_COUNT=$(echo "$PYTHON_PROCESSES" | wc -l)
+            if [ "$MODEL_COUNT" -ge 2 ]; then
+                echo ""
+                echo "  ✅ Multiple models detected on GPU (brain + inference model)"
+                test_success "Brain model is loaded in GPU memory"
+            else
+                echo ""
+                echo "  ⚠️  Only $MODEL_COUNT process(es) on GPU (expected 2+: brain + inference model)"
+                echo "  💡 Brain may not be loaded or is using CPU"
+            fi
+        else
+            echo ""
+            echo "  ⚠️  No Python processes detected on GPU"
+            echo "  💡 Brain may be using CPU or not loaded"
+        fi
+    else
+        echo "  ⚠️  Could not query GPU (may not have NVIDIA GPU)"
+    fi
+else
+    echo "  ⚠️  nvidia-smi not available (may not have NVIDIA GPU)"
+fi
+
 # Check if brain is making decisions
+echo ""
 echo "🔍 Checking if brain is active and making decisions..."
 if [ -f "modelium_test.log" ]; then
-    # Check for brain decision logs
-    BRAIN_DECISIONS=$(grep -i "brain decision\|orchestration decision\|_check_for_idle\|make_orchestration_decision" modelium_test.log | tail -10 || echo "")
-    
-    if [ ! -z "$BRAIN_DECISIONS" ]; then
-        echo "  ✅ Brain is making decisions!"
-        echo "  Recent brain activity:"
-        echo "$BRAIN_DECISIONS" | head -5 | sed 's/^/    /'
+    # Check for brain initialization
+    BRAIN_LOADED=$(grep -i "brain loaded\|Brain loaded\|Initializing Modelium Brain" modelium_test.log | tail -3 || echo "")
+    if [ ! -z "$BRAIN_LOADED" ]; then
+        echo "  ✅ Brain initialization found:"
+        echo "$BRAIN_LOADED" | head -2 | sed 's/^/    /'
     else
-        echo "  ⚠️  No brain decision logs found (may be using rule-based fallback)"
-        echo "  💡 Check if brain is enabled in modelium.yaml: modelium_brain.enabled"
+        echo "  ❌ No brain initialization logs found!"
+        echo "  💡 Brain may not have loaded - check for errors in logs"
+    fi
+    
+    # Check for brain decision logs (actual LLM calls)
+    BRAIN_LLM_DECISIONS=$(grep -i "Using Brain.*Qwen\|make_orchestration_decision\|Brain made.*decisions" modelium_test.log | tail -10 || echo "")
+    
+    if [ ! -z "$BRAIN_LLM_DECISIONS" ]; then
+        echo ""
+        echo "  ✅ Brain (Qwen LLM) is making decisions!"
+        echo "  Recent brain LLM activity:"
+        echo "$BRAIN_LLM_DECISIONS" | head -5 | sed 's/^/    /'
+        test_success "Brain (Qwen) is actively making LLM-based decisions"
+    else
+        echo ""
+        echo "  ⚠️  No brain LLM decision logs found"
+        echo "  💡 Brain may be using rule-based fallback"
+        
+        # Check for fallback messages
+        FALLBACK_LOGS=$(grep -i "fallback\|rule-based\|Using rule-based" modelium_test.log | tail -5 || echo "")
+        if [ ! -z "$FALLBACK_LOGS" ]; then
+            echo "  ⚠️  Fallback to rules detected:"
+            echo "$FALLBACK_LOGS" | head -3 | sed 's/^/    /'
+        fi
+    fi
+    
+    # Check for the old "Brain decision: ray" which is just runtime selection, not LLM
+    RUNTIME_DECISIONS=$(grep -i "Brain decision:.*ray\|Brain decision:.*vllm" modelium_test.log | tail -3 || echo "")
+    if [ ! -z "$RUNTIME_DECISIONS" ]; then
+        echo ""
+        echo "  ⚠️  Note: 'Brain decision: ray/vllm' is just runtime selection, not LLM orchestration"
+        echo "  💡 This is rule-based, not the actual Qwen brain making decisions"
     fi
     
     # Check for Prometheus metrics usage

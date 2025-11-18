@@ -96,6 +96,8 @@ class Orchestrator:
         """
         INTELLIGENT orchestration decisions.
         
+        Uses the Brain (Qwen LLM) if available, otherwise falls back to rules.
+        
         Considers:
         1. Policies (always_loaded, idle threshold)
         2. Prometheus metrics (QPS, latency, idle time)
@@ -119,6 +121,72 @@ class Orchestrator:
         policies = self.config.orchestration.policies
         idle_threshold = policies.evict_after_idle_seconds
         always_loaded = policies.always_loaded
+        
+        # Try to use Brain (Qwen LLM) for intelligent decisions
+        if self.brain is not None and self.brain.model is not None:
+            try:
+                logger.debug("🧠 Using Brain (Qwen) for orchestration decision...")
+                
+                # Build current state for brain
+                current_state = {
+                    "models_loaded": [
+                        {
+                            "name": m.name,
+                            "runtime": m.runtime,
+                            "gpu": m.target_gpu if hasattr(m, 'target_gpu') else None,
+                            "qps": self.metrics.get_model_qps(m.name, m.runtime),
+                            "idle_seconds": self.metrics.get_model_idle_seconds(m.name, m.runtime),
+                            "loaded_at": m.loaded_at,
+                        }
+                        for m in loaded_models
+                    ],
+                    "gpu_memory_pressure": gpu_memory_pressure,
+                    "total_gpus": self.config.gpu.count if self.config.gpu.count else 1,
+                }
+                
+                # Get policies dict
+                policies_dict = {
+                    "evict_after_idle_seconds": idle_threshold,
+                    "always_loaded": always_loaded,
+                    "evict_when_memory_above_percent": policies.evict_when_memory_above_percent,
+                }
+                
+                # Ask brain for decisions
+                brain_decision = self.brain.make_orchestration_decision(current_state, policies_dict)
+                
+                if brain_decision and "actions" in brain_decision:
+                    logger.info(f"🧠 Brain made {len(brain_decision.get('actions', []))} decisions")
+                    
+                    # Execute brain's decisions
+                    for action in brain_decision.get("actions", []):
+                        action_type = action.get("action")
+                        model_name = action.get("model")
+                        reasoning = action.get("reasoning", "")
+                        
+                        if action_type == "evict" and model_name:
+                            logger.info(f"🧠 Brain decision: Unload {model_name} - {reasoning}")
+                            success = self.runtime_manager.unload_model(model_name)
+                            if success:
+                                self.registry.update_model(model_name, status=ModelStatus.UNLOADED)
+                                self.metrics.record_model_unload(
+                                    self.registry.get_model(model_name).runtime if self.registry.get_model(model_name) else "unknown",
+                                    "success"
+                                )
+                                self.metrics.record_orchestration_decision("unload", f"brain_{reasoning}")
+                        elif action_type == "keep" and model_name:
+                            logger.debug(f"🧠 Brain decision: Keep {model_name} - {reasoning}")
+                        # Note: "load" actions are handled by on_model_discovered
+                    
+                    # Brain made decisions, return early
+                    return
+                    
+            except Exception as e:
+                logger.warning(f"🧠 Brain decision failed: {e}, falling back to rules")
+                if not self.brain.fallback_to_rules:
+                    raise
+        
+        # FALLBACK: Rule-based logic (used if brain unavailable or failed)
+        logger.debug("📊 Using rule-based orchestration (brain not available or failed)")
         
         # INTELLIGENT DECISIONS for each model
         for model in loaded_models:
