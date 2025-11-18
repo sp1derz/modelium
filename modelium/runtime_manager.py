@@ -663,6 +663,23 @@ max_batch_size: 32
     ) -> bool:
         """Load model via Ray Serve."""
         try:
+            self.logger.info(f"Loading {model_name} with ray...")
+            self.logger.info(f"   Model path: {model_path}")
+            self.logger.info(f"   GPU: {gpu_id}")
+            
+            # Validate model path FIRST (before any Ray operations)
+            if not model_path.exists():
+                self.logger.error(f"   ❌ Model path does not exist: {model_path}")
+                return False
+            
+            config_path = model_path / "config.json"
+            if not config_path.exists():
+                self.logger.error(f"   ❌ Model config.json not found: {config_path}")
+                return False
+            
+            self.logger.info(f"   ✅ Model path validated: {model_path}")
+            self.logger.info(f"   ✅ Config file found: {config_path}")
+            
             # Check if Ray is available
             try:
                 import ray
