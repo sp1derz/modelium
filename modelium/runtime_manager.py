@@ -194,6 +194,53 @@ class RuntimeManager:
                 self.logger.warning(f"   ⚠️  Could not check for Python headers: {e}")
                 # Continue anyway - might work
             
+            # Validate model path and files
+            model_path = Path(model_path).resolve()
+            if not model_path.exists():
+                self.logger.error(f"   ❌ Model path does not exist: {model_path}")
+                return False
+            
+            config_json = model_path / "config.json"
+            if not config_json.exists():
+                self.logger.error(f"   ❌ config.json not found at {config_json}")
+                return False
+            
+            # Check for model files
+            safetensors_files = list(model_path.glob("*.safetensors"))
+            pytorch_files = list(model_path.glob("pytorch_model*.bin"))
+            
+            if not safetensors_files and not pytorch_files:
+                self.logger.error(f"   ❌ No model files found (.safetensors or pytorch_model.bin)")
+                self.logger.error(f"   Files in {model_path}: {list(model_path.iterdir())}")
+                return False
+            
+            # Validate safetensors files if present
+            if safetensors_files:
+                for st_file in safetensors_files:
+                    try:
+                        # Quick validation: check file size and try to read header
+                        file_size = st_file.stat().st_size
+                        if file_size == 0:
+                            self.logger.error(f"   ❌ {st_file.name} is empty (0 bytes)")
+                            return False
+                        
+                        # Try to validate safetensors file
+                        try:
+                            from safetensors import safe_open
+                            with safe_open(st_file, framework="pt") as f:
+                                # Just try to read metadata
+                                keys = list(f.keys())[:1]  # Just check first key
+                                self.logger.debug(f"   ✅ {st_file.name} is valid safetensors file")
+                        except Exception as e:
+                            self.logger.error(f"   ❌ {st_file.name} is corrupted or invalid safetensors file")
+                            self.logger.error(f"   Error: {e}")
+                            self.logger.error(f"   💡 Try re-downloading the model or use a different format")
+                            return False
+                    except ImportError:
+                        self.logger.warning(f"   ⚠️  safetensors library not available, skipping validation")
+                    except Exception as e:
+                        self.logger.warning(f"   ⚠️  Could not validate {st_file.name}: {e}")
+            
             # Allocate port
             port = self._vllm_next_port
             self._vllm_next_port += 1
