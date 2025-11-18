@@ -151,12 +151,14 @@ def serve(
         if cfg.ray_serve.enabled:
             try:
                 import ray
-                console.print("   ✅ Ray installed")
+                from ray import serve
+                console.print("   ✅ Ray Serve installed")
                 runtimes_ok = True
             except ImportError:
-                console.print("   [yellow]⚠️  Ray enabled but not installed[/yellow]")
-                console.print("      Install: pip install ray[serve]")
-                console.print("      Or disable in modelium.yaml")
+                console.print("   [red]❌ Ray Serve enabled but not installed[/red]")
+                console.print("      Install: pip install 'ray[serve]'")
+                console.print("      Or disable ray_serve.enabled in modelium.yaml")
+                runtimes_ok = False  # Don't allow startup if Ray Serve is required
         
         if not runtimes_ok:
             console.print("\n[red]❌ No runtimes are available![/red]")

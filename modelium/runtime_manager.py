@@ -668,7 +668,9 @@ max_batch_size: 32
                 import ray
                 from ray import serve
             except ImportError:
-                self.logger.error("Ray not installed (pip install ray[serve])")
+                self.logger.error("   ❌ Ray Serve not installed!")
+                self.logger.error("   💡 Install: pip install 'ray[serve]'")
+                self.logger.error("   💡 Or disable ray_serve.enabled in modelium.yaml")
                 return False
             
             # Initialize Ray if needed
