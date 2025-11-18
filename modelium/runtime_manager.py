@@ -734,22 +734,26 @@ max_batch_size: 32
                 self.logger.warning(f"   ⚠️  Ray Serve may already be running: {e}")
             
             # GPT-2 deployment with actual model loading
-            # Ray Serve will automatically assign a GPU when num_gpus > 0
-            # We use CUDA_VISIBLE_DEVICES to limit which GPU Ray can see
+            # Ray Serve GPU assignment: Use Ray's native GPU resource management
+            # Instead of CUDA_VISIBLE_DEVICES (which causes IndexError in Ray 2.x+)
+            # We'll use Ray's accelerator resources or let Ray assign and handle it in the model code
             import torch
             import os
-            ray_env = {}
-            if gpu_id >= 0:
+            
+            # Don't use CUDA_VISIBLE_DEVICES in runtime_env - it causes Ray GPU mapping errors
+            # Instead, we'll use Ray's native GPU assignment and handle device selection in the model code
+            ray_env = {}  # Keep empty - no CUDA_VISIBLE_DEVICES
+            
+            # Use Ray's accelerator resources for GPU assignment (Ray 2.x+)
+            # Format: {"GPU": gpu_id} tells Ray to use specific GPU
+            accelerator_resources = {}
+            if gpu_id >= 0 and torch.cuda.is_available():
+                # Try using Ray's accelerator resources (newer API)
                 try:
-                    if torch.cuda.is_available():
-                        # Set CUDA_VISIBLE_DEVICES so Ray only sees the GPU we want
-                        # IMPORTANT: When CUDA_VISIBLE_DEVICES=1, Ray only sees GPU 1
-                        # Inside Ray actor, it will use cuda:0 (first GPU Ray can see)
-                        # But physically, it's actually system GPU 1
-                        ray_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-                        self.logger.info(f"   Setting CUDA_VISIBLE_DEVICES={gpu_id} for Ray actor")
-                        self.logger.info(f"   Ray will see physical GPU {gpu_id} as 'cuda:0' inside the actor")
-                        self.logger.info(f"   This ensures GPT-2 loads on GPU {gpu_id}, not GPU 0 (brain)")
+                    # For Ray 2.x+, we can specify GPU using accelerator resources
+                    # But simpler: just use num_gpus and handle device in model code
+                    accelerator_resources = {}  # Let Ray assign, we'll handle device in code
+                    self.logger.info(f"   Using Ray native GPU assignment (GPU {gpu_id} will be selected in model code)")
                 except:
                     pass
             
@@ -758,7 +762,8 @@ max_batch_size: 32
                 ray_actor_options={
                     "num_gpus": 1 if gpu_id >= 0 else 0,
                     "num_cpus": 2,
-                    "runtime_env": {"env_vars": ray_env} if ray_env else {}
+                    "runtime_env": {"env_vars": ray_env} if ray_env else {},
+                    **({"accelerator_type": f"GPU:{gpu_id}"} if gpu_id >= 0 and accelerator_resources else {})
                 },
                 num_replicas=1,
             )
@@ -771,19 +776,26 @@ max_batch_size: 32
                     self.logger = logging.getLogger(f"RayServe.{model_name}")
                     self.logger.info(f"Loading GPT-2 model from {model_path}...")
                     
-                    # Ray Serve automatically assigns GPU when num_gpus > 0
-                    # Use the first available CUDA device (Ray handles assignment)
-                    if torch.cuda.is_available():
-                        # IMPORTANT: When CUDA_VISIBLE_DEVICES=1 is set, Ray only sees GPU 1
-                        # From Ray's perspective, it's "cuda:0" (the first GPU Ray can see)
-                        # But physically, it's actually GPU 1 on the system
+                    # Get the target GPU from the parameter
+                    target_gpu = gpu_id
+                    
+                    # Ray Serve assigns a GPU when num_gpus > 0
+                    # We need to use the specific GPU that was requested
+                    if torch.cuda.is_available() and target_gpu >= 0:
+                        # Use the specific GPU that was requested
+                        # Ray will assign a GPU, but we explicitly use the one we want
+                        if target_gpu < torch.cuda.device_count():
+                            self.device = f"cuda:{target_gpu}"
+                            self.logger.info(f"Using GPU: {self.device} (explicit GPU {target_gpu})")
+                            self.logger.info(f"Available GPUs: {torch.cuda.device_count()}")
+                        else:
+                            # Fallback to first available GPU
+                            self.device = "cuda:0"
+                            self.logger.warning(f"Requested GPU {target_gpu} not available, using cuda:0")
+                    elif torch.cuda.is_available():
+                        # No specific GPU requested, use first available
                         self.device = "cuda:0"
-                        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
-                        physical_gpu = visible_devices if visible_devices != "all" else "0"
-                        self.logger.info(f"Using GPU: {self.device} (Ray's view)")
-                        self.logger.info(f"Physical GPU: {physical_gpu} (system GPU ID)")
-                        self.logger.info(f"Available GPUs to Ray: {torch.cuda.device_count()}")
-                        self.logger.info(f"CUDA_VISIBLE_DEVICES={visible_devices} (Ray only sees this GPU)")
+                        self.logger.info(f"Using GPU: {self.device} (first available)")
                     else:
                         self.device = "cpu"
                         self.logger.info(f"Using CPU (no GPU available)")
