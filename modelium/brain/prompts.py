@@ -145,6 +145,9 @@ def format_orchestration_prompt(
     """Format orchestration decision prompt."""
     import json
     
+    # Get list of actual model names (for validation)
+    model_names = [m.get("name") for m in current_state.get("models_loaded", [])]
+    
     return f"""Make orchestration decisions based on current state:
 
 **Current State**:
@@ -157,5 +160,11 @@ def format_orchestration_prompt(
 {json.dumps(policies, indent=2)}
 ```
 
-Decide which models to keep/evict/load (JSON only):"""
+**IMPORTANT CONSTRAINTS**:
+- You can ONLY evict/keep models that exist in "models_loaded" above
+- Available model names: {model_names}
+- DO NOT suggest loading models that don't exist - only evict or keep existing models
+- DO NOT invent model names - only use models from the list above
+
+Decide which models to keep/evict (JSON only, only use models from the list above):"""
 

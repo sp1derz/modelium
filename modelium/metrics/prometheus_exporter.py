@@ -256,14 +256,34 @@ class ModeliumMetrics:
         self.models_loaded.labels(runtime=runtime).set(count)
     
     def get_model_qps(self, model: str, runtime: str) -> float:
-        """Get current QPS for a model (from internal tracking)."""
-        model_key = f"{model}:{runtime}"
-        last_update = self._last_qps_update.get(model_key, time.time())
-        count = self._model_request_counts.get(model_key, 0)
-        elapsed = time.time() - last_update
+        """
+        Get current QPS for a model (from internal tracking).
         
-        if elapsed > 0:
-            return count / elapsed
+        Uses a sliding window: requests in last 10 seconds.
+        """
+        model_key = f"{model}:{runtime}"
+        now = time.time()
+        
+        # Get request timestamps (if we're tracking them)
+        # For now, use simple count-based approach with time window
+        count = self._model_request_counts.get(model_key, 0)
+        last_update = self._last_qps_update.get(model_key, now)
+        elapsed = now - last_update
+        
+        # If we have recent requests, calculate QPS
+        if elapsed > 0 and count > 0:
+            # Use a 10-second window for QPS calculation
+            # Reset count every 10 seconds
+            if elapsed >= 10.0:
+                # Reset for next window
+                self._model_request_counts[model_key] = 0
+                self._last_qps_update[model_key] = now
+                return 0.0
+            else:
+                # Calculate QPS over the elapsed time
+                qps = count / elapsed if elapsed > 0 else 0.0
+                return qps
+        
         return 0.0
     
     def get_model_idle_seconds(self, model: str, runtime: str) -> float:

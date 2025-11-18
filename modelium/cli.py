@@ -335,9 +335,13 @@ def serve(
                     detail=f"Model not loaded (status: {model.status.value})"
                 )
             
-            # Record request for metrics
+            # Record request for metrics (registry tracks last_request_time)
             registry.record_request(model_name)
             start_time = time.time()
+            
+            # Get model info for metrics
+            model_runtime = model.runtime if model.runtime else "unknown"
+            model_gpu = model.target_gpu if hasattr(model, 'target_gpu') else None
             
             # Run inference via RuntimeManager (automatically routes to correct runtime)
             try:
@@ -368,13 +372,23 @@ def serve(
                     # Convert to dict if it's not
                     result = {"error": f"Inference returned non-dict: {type(result)}", "raw_result": str(result)}
                 
-                # Record metrics
+                # Record metrics (CRITICAL: This updates Prometheus QPS/idle tracking)
                 latency_ms = (time.time() - start_time) * 1000
                 
-                # Safe check for error in result
-                has_error = False
-                if isinstance(result, dict):
-                    has_error = "error" in result
+                # Determine status
+                has_error = isinstance(result, dict) and "error" in result
+                status = "error" if has_error else "success"
+                
+                # Record to Prometheus (this updates QPS and idle_seconds)
+                metrics.record_request(
+                    model=model_name,
+                    runtime=model_runtime,
+                    latency_ms=latency_ms,
+                    status=status,
+                    gpu=model_gpu
+                )
+                
+                logger.debug(f"   📊 Metrics recorded: QPS will update, idle_seconds reset")
                 else:
                     logger.warning(f"   ⚠️  Result is not a dict: {type(result)}")
                 

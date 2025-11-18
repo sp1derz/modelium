@@ -158,7 +158,7 @@ class Orchestrator:
             }
             models_data.append(model_data)
             
-            logger.debug(f"   📊 Prometheus data for {m.name}: QPS={qps:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s")
+            logger.info(f"   📊 Prometheus data for {m.name}: QPS={qps:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s")
         
         current_state = {
             "models_loaded": models_data,
@@ -194,11 +194,20 @@ class Orchestrator:
         if brain_decision and "actions" in brain_decision:
             logger.info(f"🧠 Brain made {len(brain_decision.get('actions', []))} decisions")
             
+            # Get list of actual model names for validation
+            actual_model_names = {m.name for m in loaded_models}
+            
             # Execute brain's decisions
             for action in brain_decision.get("actions", []):
                 action_type = action.get("action")
                 model_name = action.get("model")
                 reasoning = action.get("reasoning", "")
+                
+                # Validate model exists (prevent brain from hallucinating models)
+                if model_name and model_name not in actual_model_names:
+                    logger.warning(f"🧠 Brain suggested action for non-existent model '{model_name}' - ignoring")
+                    logger.warning(f"   Available models: {list(actual_model_names)}")
+                    continue
                 
                 if action_type == "evict" and model_name:
                     logger.info(f"🧠 Brain decision: Unload {model_name} - {reasoning}")
@@ -212,6 +221,9 @@ class Orchestrator:
                         self.metrics.record_orchestration_decision("unload", f"brain_{reasoning}")
                 elif action_type == "keep" and model_name:
                     logger.debug(f"🧠 Brain decision: Keep {model_name} - {reasoning}")
+                elif action_type == "load" and model_name:
+                    logger.warning(f"🧠 Brain suggested loading '{model_name}' - load actions handled by on_model_discovered")
+                    # Load actions are handled when models are discovered, not here
                 # Note: "load" actions are handled by on_model_discovered
         else:
             logger.warning(f"🧠 Brain returned invalid decision (no actions)")
