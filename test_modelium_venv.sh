@@ -365,6 +365,9 @@ if [ -f "modelium_test.log" ]; then
     echo ""
     echo "Recent errors:"
     grep -i "error\|failed\|exception" modelium_test.log | tail -10 || echo "  (none found)"
+    echo ""
+    echo "📋 Full recent server logs (last 50 lines):"
+    tail -50 modelium_test.log
 fi
 
 echo ""

@@ -222,13 +222,27 @@ class RuntimeManager:
                     self.logger.error(f"   Process still running but not responding")
                 else:
                     self.logger.error(f"   Process exited with code: {process.returncode}")
-                    # Read stderr for error details
+                    # Read stderr for error details (read all available)
                     try:
-                        stderr_output = process.stderr.read()
-                        if stderr_output:
-                            self.logger.error(f"   vLLM stderr: {stderr_output[:500]}")
-                    except:
-                        pass
+                        # Try to read stderr (non-blocking)
+                        import select
+                        if select.select([process.stderr], [], [], 0)[0]:
+                            stderr_output = process.stderr.read()
+                            if stderr_output:
+                                # Log first 2000 chars of stderr
+                                self.logger.error(f"   vLLM stderr (first 2000 chars):")
+                                for line in stderr_output[:2000].split('\n')[:50]:  # First 50 lines
+                                    if line.strip():
+                                        self.logger.error(f"      {line}")
+                    except Exception as e:
+                        self.logger.error(f"   Could not read stderr: {e}")
+                        # Try alternative: communicate with timeout
+                        try:
+                            _, stderr = process.communicate(timeout=1)
+                            if stderr:
+                                self.logger.error(f"   vLLM stderr: {stderr[:1000]}")
+                        except:
+                            pass
                 try:
                     process.kill()
                 except:
