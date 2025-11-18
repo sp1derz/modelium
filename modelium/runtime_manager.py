@@ -299,14 +299,36 @@ class RuntimeManager:
             
             try:
                 self.logger.info(f"   📝 Starting subprocess...")
-                process = subprocess.Popen(
-                    cmd,
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=open(stderr_path, 'w'),
-                    start_new_session=True,
-                    text=True
-                )
+                # Try new vLLM CLI first (vLLM 0.11+)
+                try:
+                    process = subprocess.Popen(
+                        cmd,
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=open(stderr_path, 'w'),
+                        start_new_session=True,
+                        text=True
+                    )
+                    self.logger.info(f"   ✅ Using vLLM CLI: vllm serve")
+                except FileNotFoundError:
+                    # Fallback to old module path if vllm CLI not found (vLLM 0.10-)
+                    self.logger.warning(f"   ⚠️  'vllm' CLI not found, trying old module path...")
+                    cmd_old = [
+                        "python", "-m", "vllm.entrypoints.openai.api_server",
+                        "--model", str(model_path),
+                        "--host", "0.0.0.0",
+                        "--port", str(port),
+                        "--dtype", "auto",
+                    ]
+                    process = subprocess.Popen(
+                        cmd_old,
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=open(stderr_path, 'w'),
+                        start_new_session=True,
+                        text=True
+                    )
+                    self.logger.info(f"   ✅ Using old module path (python -m vllm.entrypoints.openai.api_server)")
                 
                 self.logger.info(f"   ✅ Process spawned! PID: {process.pid}")
                 self.logger.info(f"   📋 vLLM stderr log: {stderr_path}")
