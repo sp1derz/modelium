@@ -733,102 +733,102 @@ max_batch_size: 32
                 
                 # Try /v1/chat/completions first (preferred in vLLM 0.10+)
                 chat_completions_tried = False
-            try:
-                self.logger.debug(f"   Trying Chat Completions API with model: {actual_model_name}")
-                resp = requests.post(
-                    f"{endpoint}/v1/chat/completions",
-                    json={
-                        "model": actual_model_name,
-                        "messages": [
-                            {"role": "user", "content": prompt}
-                        ],
-                        "max_tokens": max_tokens,
-                        "temperature": kwargs.get("temperature", 0.7),
-                    },
-                    timeout=30
-                )
-                chat_completions_tried = True
-                
-                if resp.status_code == 200:
-                    result = resp.json()
-                    # Extract text from chat format
-                    if "choices" in result and len(result["choices"]) > 0:
-                        content = result["choices"][0].get("message", {}).get("content", "")
-                        self.logger.debug(f"   ✅ Chat Completions API succeeded")
-                        return {
-                            "text": content,
-                            "choices": result.get("choices", []),
-                            "usage": result.get("usage", {})
-                        }
-                else:
-                    # Read error message
-                    try:
-                        error_data = resp.json()
-                        error_msg = error_data.get("error", {}).get("message", resp.text)
-                    except:
-                        error_msg = resp.text
-                    
-                    self.logger.debug(f"   Chat Completions returned {resp.status_code}: {error_msg}")
-                    
-                    if resp.status_code == 400 and "does not support" in error_msg.lower():
-                        # Model doesn't support chat completions, try legacy
-                        self.logger.debug(f"   Model doesn't support Chat Completions, trying legacy Completions API")
-                    else:
-                        resp.raise_for_status()
-            except requests.exceptions.HTTPError as e:
-                error_msg = str(e)
-                self.logger.debug(f"   Chat Completions HTTP error: {error_msg}")
-                if "does not support" in error_msg.lower() or "400" in error_msg:
-                    # Fall back to legacy completions API
-                    self.logger.debug(f"   Will try legacy Completions API")
-                else:
-                    raise
-            except Exception as e:
-                self.logger.debug(f"   Chat Completions exception: {e}")
-                if not chat_completions_tried:
-                    raise
-            
-            # Fallback to legacy /v1/completions API
-            self.logger.debug(f"   Trying legacy Completions API with model: {actual_model_name}")
-            try:
-                resp = requests.post(
-                    f"{endpoint}/v1/completions",
-                    json={
-                        "model": actual_model_name,
-                        "prompt": prompt,
-                        "max_tokens": max_tokens,
-                        "temperature": kwargs.get("temperature", 0.7),
-                        **{k: v for k, v in kwargs.items() if k != "temperature"}
-                    },
-                    timeout=30
-                )
-                
-                if resp.status_code == 200:
-                    self.logger.debug(f"   ✅ Legacy Completions API succeeded")
-                    return resp.json()
-                else:
-                    # Read error message
-                    try:
-                        error_data = resp.json()
-                        error_msg = error_data.get("error", {}).get("message", resp.text)
-                    except:
-                        error_msg = resp.text
-                    
-                    self.logger.error(f"   ❌ Completions API failed: {error_msg}")
-                    resp.raise_for_status()
-            except requests.exceptions.HTTPError as e:
-                # Try to get better error message
                 try:
-                    error_data = e.response.json()
-                    error_msg = error_data.get("error", {}).get("message", str(e))
-                except:
+                    self.logger.debug(f"   Trying Chat Completions API with model: {actual_model_name}")
+                    resp = requests.post(
+                        f"{endpoint}/v1/chat/completions",
+                        json={
+                            "model": actual_model_name,
+                            "messages": [
+                                {"role": "user", "content": prompt}
+                            ],
+                            "max_tokens": max_tokens,
+                            "temperature": kwargs.get("temperature", 0.7),
+                        },
+                        timeout=30
+                    )
+                    chat_completions_tried = True
+                    
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        # Extract text from chat format
+                        if "choices" in result and len(result["choices"]) > 0:
+                            content = result["choices"][0].get("message", {}).get("content", "")
+                            self.logger.debug(f"   ✅ Chat Completions API succeeded")
+                            return {
+                                "text": content,
+                                "choices": result.get("choices", []),
+                                "usage": result.get("usage", {})
+                            }
+                    else:
+                        # Read error message
+                        try:
+                            error_data = resp.json()
+                            error_msg = error_data.get("error", {}).get("message", resp.text)
+                        except:
+                            error_msg = resp.text
+                        
+                        self.logger.debug(f"   Chat Completions returned {resp.status_code}: {error_msg}")
+                        
+                        if resp.status_code == 400 and "does not support" in error_msg.lower():
+                            # Model doesn't support chat completions, try legacy
+                            self.logger.debug(f"   Model doesn't support Chat Completions, trying legacy Completions API")
+                        else:
+                            resp.raise_for_status()
+                except requests.exceptions.HTTPError as e:
                     error_msg = str(e)
+                    self.logger.debug(f"   Chat Completions HTTP error: {error_msg}")
+                    if "does not support" in error_msg.lower() or "400" in error_msg:
+                        # Fall back to legacy completions API
+                        self.logger.debug(f"   Will try legacy Completions API")
+                    else:
+                        raise
+                except Exception as e:
+                    self.logger.debug(f"   Chat Completions exception: {e}")
+                    if not chat_completions_tried:
+                        raise
                 
-                self.logger.error(f"   ❌ Both Chat and Completions APIs failed")
-                self.logger.error(f"   Model: {actual_model_name}")
-                self.logger.error(f"   Endpoint: {endpoint}")
-                self.logger.error(f"   Error: {error_msg}")
-                raise requests.exceptions.HTTPError(f"vLLM inference failed: {error_msg}", response=e.response)
+                # Fallback to legacy /v1/completions API
+                self.logger.debug(f"   Trying legacy Completions API with model: {actual_model_name}")
+                try:
+                    resp = requests.post(
+                        f"{endpoint}/v1/completions",
+                        json={
+                            "model": actual_model_name,
+                            "prompt": prompt,
+                            "max_tokens": max_tokens,
+                            "temperature": kwargs.get("temperature", 0.7),
+                            **{k: v for k, v in kwargs.items() if k != "temperature"}
+                        },
+                        timeout=30
+                    )
+                    
+                    if resp.status_code == 200:
+                        self.logger.debug(f"   ✅ Legacy Completions API succeeded")
+                        return resp.json()
+                    else:
+                        # Read error message
+                        try:
+                            error_data = resp.json()
+                            error_msg = error_data.get("error", {}).get("message", resp.text)
+                        except:
+                            error_msg = resp.text
+                        
+                        self.logger.error(f"   ❌ Completions API failed: {error_msg}")
+                        resp.raise_for_status()
+                except requests.exceptions.HTTPError as e:
+                    # Try to get better error message
+                    try:
+                        error_data = e.response.json()
+                        error_msg = error_data.get("error", {}).get("message", str(e))
+                    except:
+                        error_msg = str(e)
+                    
+                    self.logger.error(f"   ❌ Both Chat and Completions APIs failed")
+                    self.logger.error(f"   Model: {actual_model_name}")
+                    self.logger.error(f"   Endpoint: {endpoint}")
+                    self.logger.error(f"   Error: {error_msg}")
+                    raise requests.exceptions.HTTPError(f"vLLM inference failed: {error_msg}", response=e.response)
             
             elif runtime == "triton":
                 # Triton uses KServe v2 (simplified example)
