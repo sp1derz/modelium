@@ -279,13 +279,103 @@ echo "📊 Current model registry status:"
 curl -s http://localhost:8000/models | jq '.' 2>/dev/null || curl -s http://localhost:8000/models
 
 echo ""
-echo "💡 TIP: If your model is in /home/ec2-user/models/incoming but config watches /models/incoming:"
-echo "   Update modelium.yaml watch_directories to:"
-echo "     watch_directories:"
-echo "       - \"/home/ec2-user/models/incoming\""
-echo ""
-echo "   Or create symlink:"
-echo "     sudo mkdir -p /models && sudo ln -s /home/ec2-user/models /models/models"
+echo "🔧 Attempting automatic fix..."
+
+# Find where model files actually are
+MODEL_FOUND_IN=""
+for dir in "/home/ec2-user/models/incoming" "./models/incoming" "$HOME/models/incoming" "$(pwd)/models/incoming"; do
+    if [ -f "$dir/model.safetensors" ] || [ -f "$dir/config.json" ]; then
+        MODEL_FOUND_IN="$dir"
+        echo "  ✅ Found model files in: $MODEL_FOUND_IN"
+        break
+    fi
+done
+
+# Check what directory is being watched
+WATCHED_DIR=$(echo "$WATCH_DIRS" | head -1 | xargs)
+
+if [ ! -z "$MODEL_FOUND_IN" ] && [ ! -z "$WATCHED_DIR" ]; then
+    # Normalize paths
+    MODEL_FOUND_IN_ABS=$(cd "$(dirname "$MODEL_FOUND_IN")" 2>/dev/null && pwd)/$(basename "$MODEL_FOUND_IN") || echo "$MODEL_FOUND_IN"
+    WATCHED_DIR_ABS=$(cd "$(dirname "$WATCHED_DIR")" 2>/dev/null && pwd)/$(basename "$WATCHED_DIR") 2>/dev/null || echo "$WATCHED_DIR"
+    
+    # Check if they're different
+    if [ "$MODEL_FOUND_IN_ABS" != "$WATCHED_DIR_ABS" ]; then
+        echo "  ⚠️  Model is in $MODEL_FOUND_IN but config watches $WATCHED_DIR"
+        echo "  🔧 Fixing by updating config..."
+        
+        # Update config file
+        if [ -f "modelium.yaml" ]; then
+            # Create backup
+            cp modelium.yaml modelium.yaml.backup
+            
+            # Update watch_directories in config
+            if grep -q "watch_directories:" modelium.yaml; then
+                # Use absolute path
+                MODEL_DIR_ABS=$(realpath "$MODEL_FOUND_IN" 2>/dev/null || echo "$MODEL_FOUND_IN")
+                
+                # Update the config using Python
+                python3 -c "
+import yaml
+import os
+
+model_dir = os.path.abspath(os.path.expanduser('$MODEL_DIR_ABS'))
+
+try:
+    with open('modelium.yaml', 'r') as f:
+        config = yaml.safe_load(f) or {}
+
+    # Update watch_directories
+    if 'orchestration' not in config:
+        config['orchestration'] = {}
+    if 'model_discovery' not in config['orchestration']:
+        config['orchestration']['model_discovery'] = {}
+    
+    config['orchestration']['model_discovery']['watch_directories'] = [model_dir]
+    
+    with open('modelium.yaml', 'w') as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    print(f'✅ Updated modelium.yaml to watch: {model_dir}')
+except Exception as e:
+    print(f'❌ Error updating config: {e}')
+    exit(1)
+"
+                
+                if [ $? -eq 0 ]; then
+                    test_success "Config updated successfully"
+                    echo "  📝 Restarting Modelium server to apply changes..."
+                    pkill -f "modelium.cli serve" 2>/dev/null || true
+                    sleep 2
+                    
+                    # Restart server
+                    nohup python -m modelium.cli serve > modelium_test.log 2>&1 &
+                    MODELIUM_PID=$!
+                    echo "  ✅ Server restarted (PID: $MODELIUM_PID)"
+                    
+                    # Wait for server to be ready
+                    sleep 5
+                    for i in {1..10}; do
+                        if curl -s http://localhost:8000/health | grep -q "healthy"; then
+                            echo "  ✅ Server is ready"
+                            break
+                        fi
+                        sleep 2
+                    done
+                else
+                    echo "  ⚠️  Failed to update config automatically"
+                    echo "  💡 Manual fix: Update modelium.yaml watch_directories to:"
+                    echo "     watch_directories:"
+                    echo "       - \"$MODEL_FOUND_IN\""
+                fi
+            fi
+        fi
+    else
+        echo "  ✅ Model location matches watched directory"
+    fi
+else
+    echo "  ⚠️  Could not determine model location or watched directory"
+fi
 
 # ============================================
 # STEP 11: Wait for Model Detection
