@@ -71,7 +71,7 @@ test_success "docker-compose is installed"
 test_step "STEP 3: Cleaning up previous containers"
 
 docker-compose down -v 2>/dev/null || true
-docker rm -f modelium-server 2>/dev/null || true
+docker rm -f modelium-server vllm-server ray-server 2>/dev/null || true
 test_success "Cleaned up previous containers"
 
 # ============================================
@@ -99,9 +99,70 @@ mkdir -p models/incoming
 test_success "Model directory created"
 
 # ============================================
-# STEP 6: Start Container
+# STEP 6: Start Runtime Containers (vLLM/Ray)
 # ============================================
-test_step "STEP 6: Starting Modelium container"
+test_step "STEP 6: Starting runtime containers"
+
+# Create network if it doesn't exist (docker-compose will create it, but we need it now)
+docker network create modelium_modelium-network 2>/dev/null || true
+
+# Cleanup any existing runtime containers
+docker rm -f vllm-server 2>/dev/null || true
+docker rm -f ray-server 2>/dev/null || true
+
+# Start vLLM container (for LLM inference)
+# Note: vLLM container requires a model to start
+# Users typically start their own vLLM containers with their models
+# This container will be used by Modelium when models are loaded
+echo "Starting vLLM container..."
+echo "Note: vLLM requires a model parameter. Starting with placeholder..."
+echo "      Modelium will connect to this container when loading models"
+docker run -d \
+  --name vllm-server \
+  --gpus all \
+  -p 8001:8000 \
+  --network modelium_modelium-network \
+  vllm/vllm-openai:latest \
+  --model gpt2 \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --dtype auto || {
+    test_fail "Failed to start vLLM container"
+    echo "Note: vLLM requires NVIDIA GPU. If no GPU available, tests may fail."
+    echo "      You can skip this step if testing without GPU."
+}
+
+sleep 5
+if docker ps | grep -q vllm-server; then
+    test_success "vLLM container started"
+else
+    echo "⚠️  vLLM container not running (may need GPU)"
+fi
+
+# Optional: Start Ray container (commented out by default)
+# Uncomment below if you want to test with Ray Serve
+# echo "Starting Ray container..."
+# docker run -d \
+#   --name ray-server \
+#   --gpus all \
+#   -p 8002:8000 \
+#   -p 8265:8265 \
+#   --network modelium_modelium-network \
+#   rayproject/ray:latest \
+#   ray start --head --port=6379 --dashboard-host=0.0.0.0 || {
+#     test_fail "Failed to start Ray container"
+# }
+# sleep 5
+# if docker ps | grep -q ray-server; then
+#     test_success "Ray container started"
+# else
+#     test_fail "Ray container not running"
+# fi
+
+# ============================================
+# STEP 7: Start Modelium Container
+# ============================================
+test_step "STEP 7: Starting Modelium container"
 
 if docker-compose up -d; then
     test_success "Container started"
@@ -331,19 +392,24 @@ echo "   docker-compose logs -f"
 echo ""
 echo "2. Stop it:"
 echo "   docker-compose down"
+echo "   docker rm -f vllm-server ray-server  # Stop runtime containers"
 echo ""
 echo "3. Stop and remove volumes:"
 echo "   docker-compose down -v"
+echo "   docker rm -f vllm-server ray-server  # Stop runtime containers"
 echo ""
 
 read -p "Stop container now? (y/N): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    test_step "Stopping container"
+    test_step "Stopping containers"
     docker-compose down
-    test_success "Container stopped"
+    docker rm -f vllm-server ray-server 2>/dev/null || true
+    test_success "Containers stopped"
 else
-    echo "Container left running. Stop with: docker-compose down"
+    echo "Containers left running. Stop with:"
+    echo "  docker-compose down"
+    echo "  docker rm -f vllm-server ray-server"
 fi
 
 # ============================================
