@@ -735,33 +735,59 @@ max_batch_size: 32
         
         Routes to correct runtime automatically.
         """
-        if model_name not in self._loaded_models:
-            return {"error": "Model not loaded"}
-        
-        info = self._loaded_models[model_name]
-        runtime = info["runtime"]
-        
         try:
+            self.logger.info(f"🔍 Starting inference for model: {model_name}")
+            self.logger.debug(f"   Prompt: {prompt[:100]}...")
+            self.logger.debug(f"   Max tokens: {max_tokens}, kwargs: {kwargs}")
+            
+            if model_name not in self._loaded_models:
+                self.logger.error(f"   ❌ Model '{model_name}' not in loaded models")
+                self.logger.debug(f"   Available models: {list(self._loaded_models.keys())}")
+                return {"error": "Model not loaded"}
+            
+            info = self._loaded_models[model_name]
+            runtime = info.get("runtime")
+            self.logger.debug(f"   Runtime: {runtime}")
+            self.logger.debug(f"   Model info: {info}")
+            
+            if not runtime:
+                self.logger.error(f"   ❌ No runtime specified for model '{model_name}'")
+                return {"error": "No runtime specified"}
+            
             if runtime == "vllm":
                 # vLLM uses OpenAI-compatible API
                 endpoint = info['endpoint']
                 
                 # Get actual model name from vLLM (might be different from our model_name)
                 # vLLM might use the model path or a derived name
-                actual_model_name = info.get("vllm_model_name", model_name)
+                self.logger.debug(f"   Getting model name from info dict...")
+                actual_model_name = info.get("vllm_model_name")
+                self.logger.debug(f"   vllm_model_name from info: {actual_model_name} (type: {type(actual_model_name)})")
+                
+                if actual_model_name is None:
+                    actual_model_name = model_name
+                    self.logger.debug(f"   Using model_name as fallback: {actual_model_name}")
                 
                 # ALWAYS query vLLM's /v1/models to get the exact model identifier
                 # This ensures we use the correct name that vLLM expects
                 try:
                     self.logger.info(f"   🔍 Querying vLLM /v1/models to get exact model identifier...")
+                    self.logger.debug(f"   Endpoint: {endpoint}")
                     models_resp = requests.get(f"{endpoint}/v1/models", timeout=5)
+                    self.logger.debug(f"   Response status: {models_resp.status_code}")
+                    
                     if models_resp.status_code == 200:
                         models_data = models_resp.json()
                         self.logger.debug(f"   vLLM /v1/models response: {models_data}")
+                        
                         if "data" in models_data and len(models_data["data"]) > 0:
                             # Use the first available model's id (this is what vLLM expects)
                             model_info = models_data["data"][0]
-                            actual_model_name = model_info.get("id", model_name)
+                            new_model_name = model_info.get("id")
+                            self.logger.debug(f"   Model id from response: {new_model_name} (type: {type(new_model_name)})")
+                            
+                            if new_model_name is not None:
+                                actual_model_name = new_model_name
                             
                             # Check what tasks this model supports
                             owned_by = model_info.get("owned_by", "")
@@ -770,12 +796,16 @@ max_batch_size: 32
                             
                             # For GPT-2, if model name is a path, also try just the model name
                             # vLLM might accept either format
-                            if "/" in actual_model_name and "gpt2" in actual_model_name.lower():
-                                # Extract just "gpt2" from path
-                                path_parts = actual_model_name.split("/")
-                                simple_name = [p for p in path_parts if "gpt2" in p.lower()][-1] if path_parts else None
-                                if simple_name:
-                                    self.logger.info(f"   💡 GPT-2 detected, will also try simple name: '{simple_name}'")
+                            try:
+                                if actual_model_name and isinstance(actual_model_name, str):
+                                    if "/" in actual_model_name and "gpt2" in actual_model_name.lower():
+                                        # Extract just "gpt2" from path
+                                        path_parts = actual_model_name.split("/")
+                                        simple_name = [p for p in path_parts if "gpt2" in p.lower()][-1] if path_parts else None
+                                        if simple_name:
+                                            self.logger.info(f"   💡 GPT-2 detected, will also try simple name: '{simple_name}'")
+                            except Exception as e:
+                                self.logger.warning(f"   ⚠️  Error checking GPT-2 name format: {e}")
                             
                             # Log full model info for debugging
                             self.logger.debug(f"   Full model info: {model_info}")
@@ -784,22 +814,43 @@ max_batch_size: 32
                     else:
                         self.logger.warning(f"   ⚠️  vLLM /v1/models returned {models_resp.status_code}, using stored: {actual_model_name}")
                 except Exception as e:
-                    self.logger.warning(f"   ⚠️  Could not query vLLM /v1/models: {e}, using stored: {actual_model_name}")
+                    self.logger.warning(f"   ⚠️  Could not query vLLM /v1/models: {e}")
+                    self.logger.debug(f"   Exception type: {type(e)}, args: {e.args}")
+                    import traceback
+                    self.logger.debug(f"   Traceback: {traceback.format_exc()}")
+                    self.logger.debug(f"   Using stored: {actual_model_name}")
                 
                 # For GPT-2, try different model name formats
                 # vLLM might accept the full path or just "gpt2"
+                self.logger.debug(f"   Preparing model names to try...")
+                self.logger.debug(f"   actual_model_name: {actual_model_name} (type: {type(actual_model_name)})")
+                
                 if actual_model_name is None:
                     actual_model_name = model_name
                     self.logger.warning(f"   ⚠️  actual_model_name was None, using model_name: {model_name}")
                 
+                if not isinstance(actual_model_name, str):
+                    self.logger.error(f"   ❌ actual_model_name is not a string: {actual_model_name} (type: {type(actual_model_name)})")
+                    actual_model_name = str(actual_model_name) if actual_model_name else model_name
+                    self.logger.warning(f"   Converted to string: {actual_model_name}")
+                
                 model_names_to_try = [actual_model_name]
-                if actual_model_name and "/" in actual_model_name and "gpt2" in actual_model_name.lower():
-                    # Extract just "gpt2" from path
-                    path_parts = actual_model_name.split("/")
-                    simple_name = [p for p in path_parts if "gpt2" in p.lower()][-1] if path_parts else None
-                    if simple_name and simple_name != actual_model_name:
-                        model_names_to_try.append(simple_name)
-                        self.logger.info(f"   💡 Will try model names: {model_names_to_try}")
+                
+                try:
+                    if actual_model_name and isinstance(actual_model_name, str):
+                        if "/" in actual_model_name and "gpt2" in actual_model_name.lower():
+                            # Extract just "gpt2" from path
+                            path_parts = actual_model_name.split("/")
+                            simple_name = [p for p in path_parts if "gpt2" in p.lower()][-1] if path_parts else None
+                            if simple_name and simple_name != actual_model_name:
+                                model_names_to_try.append(simple_name)
+                                self.logger.info(f"   💡 Will try model names: {model_names_to_try}")
+                except Exception as e:
+                    self.logger.error(f"   ❌ Error preparing model name variants: {e}")
+                    self.logger.debug(f"   Exception type: {type(e)}, args: {e.args}")
+                    import traceback
+                    self.logger.debug(f"   Traceback: {traceback.format_exc()}")
+                    # Continue with just the original name
                 
                 # Try /v1/chat/completions first (preferred in vLLM 0.10+)
                 chat_completions_tried = False
@@ -976,5 +1027,10 @@ max_batch_size: 32
                 return resp.json()
             
         except Exception as e:
-            return {"error": str(e)}
+            self.logger.error(f"   ❌ Inference failed with exception: {e}")
+            self.logger.error(f"   Exception type: {type(e)}")
+            self.logger.error(f"   Exception args: {e.args}")
+            import traceback
+            self.logger.error(f"   Full traceback:\n{traceback.format_exc()}")
+            return {"error": str(e), "error_type": type(e).__name__, "traceback": traceback.format_exc()}
 
