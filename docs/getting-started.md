@@ -82,7 +82,7 @@ That's it! No other configuration needed.
 **Requirements**: Linux + CUDA
 
 ```bash
-# Install
+# Install vLLM
 pip install vllm
 
 # Configure
@@ -90,10 +90,21 @@ pip install vllm
 vllm:
   enabled: true
 
-# That's it! Modelium spawns vLLM automatically when needed
+# That's it!
 ```
 
-**Note**: Modelium handles vLLM processes automatically. You don't need to start vLLM manually.
+**✅ AUTO-SPAWNED**: Modelium automatically spawns vLLM processes when loading models. You do **NOT** need to:
+- ❌ Start vLLM containers manually
+- ❌ Run `vllm serve` commands
+- ❌ Configure vLLM endpoints
+
+**How it works**:
+1. You drop a model (e.g., GPT-2) in `/models/incoming/`
+2. Modelium detects it's an LLM
+3. Modelium spawns: `python -m vllm.entrypoints.openai.api_server --model gpt2 --port 8100`
+4. One vLLM process per model, automatically managed
+
+**You only install vLLM once, Modelium handles the rest!**
 
 ### Ray Serve (For General Models)
 
@@ -102,11 +113,8 @@ vllm:
 **Requirements**: Any OS
 
 ```bash
-# Install
+# Install Ray
 pip install ray[serve]
-
-# Start Ray (optional, Modelium can start it)
-ray start --head --port=6379
 
 # Configure
 # Edit modelium.yaml:
@@ -116,7 +124,18 @@ ray_serve:
 # Done!
 ```
 
-**Note**: Modelium can initialize Ray automatically if not running.
+**✅ AUTO-INITIALIZED**: Modelium can initialize Ray automatically if not running. You do **NOT** need to:
+- ❌ Start Ray cluster manually (unless you want multi-node)
+- ❌ Run `ray start` commands (for single-node)
+
+**How it works**:
+1. You drop a model in `/models/incoming/`
+2. Modelium detects it needs Ray
+3. Modelium initializes Ray (if not running): `ray.init()`
+4. Modelium deploys model as Ray Serve deployment
+
+**For single-node (local): No manual setup needed!**  
+**For multi-node: Start Ray cluster first, then Modelium connects to it.**
 
 ### Triton (For All Models)
 

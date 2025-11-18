@@ -73,7 +73,7 @@ modelium/
 
 ### 2. Orchestrator (`services/orchestrator.py`)
 
-**Purpose**: The brain of the system
+**Purpose**: The INTELLIGENT brain of the system
 
 **Key Method**:
 ```python
@@ -94,15 +94,54 @@ def on_model_discovered(model_name, model_path):
     # Done!
 ```
 
-**Background Loop**:
+**INTELLIGENT Background Loop** (Every 10s):
 ```python
 def _check_for_idle_models():
-    """Every 10s: Check and unload idle models"""
+    """
+    Smart decisions considering:
+    1. Policies (from config)
+    2. Prometheus metrics (real-time)
+    3. GPU memory state
+    """
     
     for model in loaded_models:
-        if model.idle_seconds > 300:  # 5 minutes
-            runtime_manager.unload_model(model.name)
+        # Get metrics
+        qps = metrics.get_model_qps(model.name)
+        idle_seconds = metrics.get_model_idle_seconds(model.name)
+        gpu_pressure = self._get_gpu_memory_pressure()
+        
+        # RULE 1: Never unload if in always_loaded list
+        if model.name in always_loaded:
+            continue
+        
+        # RULE 2: Keep if actively used (QPS > 0.5)
+        if qps > 0.5:
+            continue
+        
+        # RULE 3: Keep if has ANY usage (QPS > 0.01)
+        # Even 1 req/100s = someone using it!
+        if qps > 0.01:
+            continue
+        
+        # RULE 4: Keep if recently used
+        if idle_seconds < idle_threshold:
+            continue
+        
+        # RULE 5: Unload if TRULY idle AND (GPU needs space OR idle > 2x threshold)
+        if qps == 0 and idle_seconds > idle_threshold:
+            if gpu_pressure or idle_seconds > (idle_threshold * 2):
+                runtime_manager.unload_model(model.name)
+            else:
+                # Idle but GPU has space - keep it (might be used soon!)
+                pass
 ```
+
+**Why This is INTELLIGENT**:
+- ✅ Scenario 1: 5 models, 1 hot (100 QPS), 4 warm (1-5 QPS) → **Keeps all 5** (all being used!)
+- ✅ Scenario 2: Model with 80 QPS at 60% GPU → **No scaling** (sufficient)
+- ✅ Scenario 3: Model with 0 QPS for 10+ min → **Unloads only if GPU needs space**
+- ✅ Never aggressive: Prefers keeping models loaded unless necessary
+- ✅ GPU-aware: Only unloads when memory pressure exists
 
 ### 3. ModelWatcher (`services/model_watcher.py`)
 

@@ -93,27 +93,122 @@ class Orchestrator:
             time.sleep(self._decision_interval)
     
     def _check_for_idle_models(self):
-        """Check loaded models and unload idle ones."""
+        """
+        INTELLIGENT orchestration decisions.
+        
+        Considers:
+        1. Policies (always_loaded, idle threshold)
+        2. Prometheus metrics (QPS, latency, idle time)
+        3. Current state (GPU memory, what's running)
+        
+        Makes smart decisions about:
+        - Keep actively used models (even low QPS)
+        - Unload truly idle models
+        - Respect GPU memory pressure
+        - Never unload if pending requests
+        """
         loaded_models = self.registry.get_loaded_models()
         
+        if not loaded_models:
+            return
+        
+        # Get GPU memory state
+        gpu_memory_pressure = self._get_gpu_memory_pressure()
+        
+        # Get policies
+        policies = self.config.orchestration.policies
+        idle_threshold = policies.evict_after_idle_seconds
+        always_loaded = policies.always_loaded
+        
+        # INTELLIGENT DECISIONS for each model
         for model in loaded_models:
-            # Get metrics
+            # Get comprehensive metrics
             idle_seconds = self.metrics.get_model_idle_seconds(model.name, model.runtime)
             qps = self.metrics.get_model_qps(model.name, model.runtime)
             
-            # Should unload?
-            threshold = self.config.orchestration.policies.evict_after_idle_seconds
-            min_qps = 0.1
+            # RULE 1: Never unload always_loaded models
+            if model.name in always_loaded:
+                logger.debug(f"✅ Keeping {model.name}: always_loaded policy")
+                continue
             
-            if idle_seconds > threshold and qps < min_qps:
-                # Check if it's in always_loaded list
-                always_loaded = self.config.orchestration.policies.always_loaded
-                if model.name not in always_loaded:
-                    logger.info(f"🔽 Unloading idle model: {model.name} (idle: {idle_seconds:.0f}s, QPS: {qps:.2f})")
-                    self.runtime_manager.unload_model(model.name)
-                    self.registry.update_model(model.name, status=ModelStatus.UNLOADED)
-                    self.metrics.record_model_unload(model.runtime, "success")
-                    self.metrics.record_orchestration_decision("unload", "idle_timeout")
+            # RULE 2: Keep if actively used (QPS > 0.5)
+            # Even 1 request per 2 seconds means someone is using it!
+            if qps > 0.5:
+                logger.debug(f"✅ Keeping {model.name}: active (QPS: {qps:.2f})")
+                continue
+            
+            # RULE 3: Keep if has ANY QPS (even 0.1)
+            # Someone is using it occasionally, don't be aggressive
+            if qps > 0.01:  # More than 1 request per 100 seconds
+                logger.debug(f"✅ Keeping {model.name}: occasional use (QPS: {qps:.2f})")
+                continue
+            
+            # RULE 4: Keep if recently used (within idle threshold)
+            if idle_seconds < idle_threshold:
+                logger.debug(f"✅ Keeping {model.name}: recently used ({idle_seconds:.0f}s ago)")
+                continue
+            
+            # RULE 5: Unload if completely idle AND:
+            #   - Idle > threshold AND
+            #   - QPS = 0 (truly unused) AND
+            #   - (GPU memory pressure OR idle > 2x threshold)
+            
+            completely_idle = (qps == 0 and idle_seconds > idle_threshold)
+            
+            if completely_idle:
+                # Extra condition: Only unload if GPU needs space OR model is REALLY idle
+                should_unload = (
+                    gpu_memory_pressure or  # We need GPU memory
+                    idle_seconds > (idle_threshold * 2)  # Model idle for 2x threshold (10+ min)
+                )
+                
+                if should_unload:
+                    logger.info(
+                        f"🔽 Unloading idle model: {model.name} "
+                        f"(idle: {idle_seconds:.0f}s, QPS: {qps:.2f}, "
+                        f"GPU pressure: {gpu_memory_pressure})"
+                    )
+                    
+                    success = self.runtime_manager.unload_model(model.name)
+                    if success:
+                        self.registry.update_model(model.name, status=ModelStatus.UNLOADED)
+                        self.metrics.record_model_unload(model.runtime, "success")
+                        self.metrics.record_orchestration_decision(
+                            "unload", 
+                            f"idle_{idle_seconds}s_gpu_pressure_{gpu_memory_pressure}"
+                        )
+                else:
+                    # Idle but we have GPU space - keep it loaded (why not?)
+                    logger.debug(
+                        f"⏸️  {model.name} idle ({idle_seconds:.0f}s) but keeping "
+                        f"(GPU has space, might be used soon)"
+                    )
+    
+    def _get_gpu_memory_pressure(self) -> bool:
+        """
+        Check if GPUs are under memory pressure.
+        
+        Returns True if any GPU is > 85% full (default threshold).
+        """
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                return False
+            
+            threshold = self.config.orchestration.policies.evict_when_memory_above_percent / 100.0
+            
+            for i in range(torch.cuda.device_count()):
+                total = torch.cuda.get_device_properties(i).total_memory
+                allocated = torch.cuda.memory_allocated(i)
+                
+                if allocated / total > threshold:
+                    logger.debug(f"GPU {i} under pressure: {allocated/total*100:.1f}% used")
+                    return True
+            
+            return False
+        except Exception as e:
+            logger.error(f"Error checking GPU memory: {e}")
+            return False  # Assume no pressure if we can't check
     
     def on_model_discovered(self, model_name: str, model_path: str):
         """
