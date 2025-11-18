@@ -1,164 +1,51 @@
 # Usage Guide
 
+## Quick Reference
+
+```bash
+# Start server
+python -m modelium.cli serve
+
+# Drop model
+cp my-model /models/incoming/
+
+# Use it
+curl http://localhost:8000/predict/my-model \
+  -d '{"prompt": "Hello", "max_tokens": 50}'
+
+# That's it!
+```
+
 ## CLI Commands
-
-### Check System
-
-```bash
-# Basic check
-python -m modelium.cli check
-
-# Verbose (shows GPU details)
-python -m modelium.cli check --verbose
-```
-
-### Initialize Configuration
-
-```bash
-# Create default config
-python -m modelium.cli init
-
-# Force overwrite existing
-python -m modelium.cli init --force
-```
 
 ### Start Server
 
 ```bash
-# Default config (modelium.yaml)
+# Default (uses modelium.yaml)
 python -m modelium.cli serve
 
 # Custom config
-python -m modelium.cli serve --config my-config.yaml
+python -m modelium.cli serve --config custom.yaml
 
 # Custom host/port
 python -m modelium.cli serve --host 0.0.0.0 --port 8080
 
-# Run in background
+# Background
 nohup python -m modelium.cli serve > modelium.log 2>&1 &
-```
-
-## Basic Workflow
-
-### 1. Drop Models
-
-```bash
-# Copy model to watched directory
-cp your_model.pt /models/incoming/
-
-# Or use any supported format
-cp model.onnx /models/incoming/
-cp model.safetensors /models/incoming/
-```
-
-### 2. Monitor Discovery
-
-```bash
-# Watch logs in real-time
-tail -f modelium.log
-
-# Check models API
-curl http://localhost:8000/models | jq .
-```
-
-### 3. Make Requests
-
-```bash
-# Via curl
-curl -X POST http://localhost:8000/predict/your_model \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "Your input text",
-    "organizationId": "your-org",
-    "max_tokens": 100,
-    "temperature": 0.7
-  }'
-
-# Via Python
-import requests
-
-response = requests.post(
-    "http://localhost:8000/predict/your_model",
-    json={
-        "prompt": "Your input text",
-        "organizationId": "your-org",
-        "max_tokens": 100
-    }
-)
-print(response.json())
-```
-
-## Configuration
-
-### Minimal Config
-
-```yaml
-organization:
-  id: "my-company"
-
-orchestration:
-  model_discovery:
-    watch_directories: ["/models/incoming"]
-
-gpu:
-  enabled: true
-```
-
-### With Brain Enabled
-
-```yaml
-modelium_brain:
-  enabled: true
-  fallback_to_rules: true
-
-orchestration:
-  enabled: true
-  policies:
-    evict_after_idle_seconds: 300
-```
-
-## Examples
-
-### Deploy LLM
-
-```bash
-# Drop Qwen model
-cp qwen-7b.pt /models/incoming/
-
-# Modelium automatically:
-# - Detects it's an LLM
-# - Chooses vLLM runtime
-# - Deploys to optimal GPU
-# - Exposes API endpoint
-```
-
-### Deploy Vision Model
-
-```bash
-# Drop ResNet model
-cp resnet50.pt /models/incoming/
-
-# Modelium automatically:
-# - Detects it's a vision model
-# - Chooses TensorRT for max performance
-# - Deploys alongside other models
 ```
 
 ## API Endpoints
 
-### Predict
+### Health Check
 
 ```bash
-POST /predict/{model_name}
-Content-Type: application/json
+GET /health
 
-{
-  "input": "data",
-  "organizationId": "org-id"
-}
+# Returns:
+{"status": "healthy"}
 ```
 
-### Status
+### System Status
 
 ```bash
 GET /status
@@ -170,10 +57,8 @@ GET /status
   "gpu_count": 4,
   "gpu_enabled": true,
   "brain_enabled": true,
-  "orchestration_enabled": true,
   "models_loaded": 3,
-  "models_discovered": 5,
-  "models_loading": 1
+  "models_discovered": 5
 }
 ```
 
@@ -186,131 +71,311 @@ GET /models
 {
   "models": [
     {
-      "name": "qwen-7b",
+      "name": "gpt2",
       "status": "loaded",
       "runtime": "vllm",
-      "gpu": 1,
-      "qps": 50.2,
-      "idle_seconds": 0
+      "gpu": 0,
+      "path": "/models/incoming/gpt2"
     },
     {
-      "name": "bert-base",
+      "name": "bert",
       "status": "unloaded",
-      "runtime": "ray_serve",
-      "gpu": null,
-      "qps": 0,
-      "idle_seconds": 650
+      "runtime": "ray",
+      "gpu": null
     }
   ]
 }
 ```
 
-### Health Check
+### Run Inference
 
 ```bash
-GET /health
+POST /predict/{model_name}
+Content-Type: application/json
 
-# Returns:
 {
-  "status": "healthy"
+  "prompt": "Your input text",
+  "max_tokens": 100,
+  "temperature": 0.7,
+  "organizationId": "your-org"  # Optional, for multi-tenancy
+}
+
+# Example:
+curl -X POST http://localhost:8000/predict/gpt2 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Once upon a time",
+    "max_tokens": 50,
+    "temperature": 0.7
+  }'
+
+# Response:
+{
+  "id": "cmpl-...",
+  "object": "text_completion",
+  "created": 1699...,
+  "model": "gpt2",
+  "choices": [{
+    "text": " in a land far away...",
+    "index": 0,
+    "finish_reason": "length"
+  }]
 }
 ```
 
-## Advanced Usage
+## Configuration
 
-### Custom Runtime Selection
+### Minimal Config
 
 ```yaml
-runtime:
-  default: "auto"  # Let brain decide
-  overrides:
-    llm: "vllm"        # Force LLMs to vLLM
-    vision: "tensorrt"  # Force vision to TensorRT
-    text: "ray_serve"   # Force text models to Ray
+# modelium.yaml
+
+# Enable at least one runtime
+vllm:
+  enabled: true
+
+# Watch directory
+orchestration:
+  model_discovery:
+    watch_directories:
+      - /models/incoming
 ```
 
-### Orchestration Policies
+### Full Config
 
 ```yaml
+# Organization (multi-tenancy)
+organization:
+  id: "my-company"
+  name: "My Company"
+
+# Runtimes
+vllm:
+  enabled: true
+triton:
+  enabled: false
+ray_serve:
+  enabled: false
+
+# Model discovery
 orchestration:
   enabled: true
-  mode: "intelligent"  # or "simple" for rule-based only
+  model_discovery:
+    watch_directories:
+      - /models/incoming
+    scan_interval_seconds: 30
   
-  decision_interval_seconds: 10  # How often brain checks
-  
+  # Unload policy
   policies:
-    # Eviction rules
-    evict_after_idle_seconds: 300  # 5 minutes
-    evict_when_memory_above_percent: 85
-    
-    # Never evict these models
-    always_loaded: ["critical-model-v1", "main-llm"]
-    
-    # Priority settings
-    priority_by_qps: true
-    priority_custom:
-      "team-a": 10  # Higher priority
-      "team-b": 5
-    
-    # Loading behavior
-    preload_on_first_request: true
-    max_concurrent_loads: 2
-```
+    evict_after_idle_seconds: 300  # 5 min idle = unload
+    always_loaded: []  # Models that never unload
 
-### Workload Separation (Multi-Instance)
-
-For high-traffic deployments, run separate instances:
-
-```yaml
-workload_separation:
+# Metrics
+metrics:
   enabled: true
-  instances:
-    llm_instance:
-      description: "Dedicated for LLMs"
-      model_types: ["llm"]
-      runtime: "vllm"
-      gpu_count: 2
-      port_offset: 0  # vLLM at 8000
-    
-    vision_instance:
-      description: "Vision models"
-      model_types: ["vision", "image"]
-      runtime: "tensorrt"
-      gpu_count: 1
-      port_offset: 100  # TensorRT at 8100
+  port: 9090
+
+# Brain (optional)
+modelium_brain:
+  enabled: true
+  fallback_to_rules: true
+
+# GPU
+gpu:
+  enabled: auto  # auto-detect
 ```
 
-### Fast Loading (Advanced Hardware)
+## Examples
+
+### Deploy LLM
+
+```bash
+# 1. Drop model
+git clone https://huggingface.co/gpt2 models/incoming/gpt2
+
+# Modelium automatically:
+# - Detects it's an LLM
+# - Chooses vLLM runtime
+# - Loads to GPU
+# - Exposes /predict/gpt2
+
+# 2. Use it
+curl http://localhost:8000/predict/gpt2 \
+  -d '{"prompt": "Hello world", "max_tokens": 50}'
+```
+
+### Deploy Multiple Models
+
+```bash
+# Drop multiple models
+cp model1/ models/incoming/
+cp model2/ models/incoming/
+cp model3/ models/incoming/
+
+# Modelium loads them all
+# Unloads idle ones automatically
+# Maximum GPU utilization!
+```
+
+### Monitor Usage
+
+```bash
+# Prometheus metrics
+curl http://localhost:9090/metrics
+
+# Key metrics:
+# modelium_requests_total{model="gpt2",runtime="vllm"} 1234
+# modelium_latency_seconds{model="gpt2",p="50"} 0.123
+# modelium_model_idle_seconds{model="gpt2"} 45.2
+```
+
+## Python Client (Optional)
+
+```python
+import requests
+
+# Run inference
+response = requests.post(
+    "http://localhost:8000/predict/gpt2",
+    json={
+        "prompt": "Hello, my name is",
+        "max_tokens": 50,
+        "temperature": 0.7
+    }
+)
+
+print(response.json())
+
+# List models
+models = requests.get("http://localhost:8000/models").json()
+for model in models["models"]:
+    print(f"{model['name']}: {model['status']}")
+```
+
+## Docker
+
+```bash
+# Start
+docker-compose up -d
+
+# Logs
+docker-compose logs -f modelium-server
+
+# Stop
+docker-compose down
+
+# Drop model (from host)
+cp my-model models/incoming/
+```
+
+## Kubernetes
+
+```bash
+# Deploy
+kubectl apply -k infra/k8s/
+
+# Status
+kubectl get pods -n modelium
+
+# Logs
+kubectl logs -f deployment/modelium-server -n modelium
+
+# Drop model
+kubectl cp my-model modelium-server:/models/incoming/
+```
+
+## Common Patterns
+
+### Always-Loaded Models
 
 ```yaml
+# For critical models that should never unload
 orchestration:
-  fast_loading:
-    enabled: true
-    use_gpu_direct_storage: true  # Requires A100/H100 + NVMe
-    nvme_cache_path: "/mnt/nvme/models"
-    quantize_on_load: false  # FP32 → INT8 during load
+  policies:
+    always_loaded:
+      - "production-llm"
+      - "main-model"
 ```
 
-### Multi-Tenancy & Rate Limiting
+### Custom Unload Time
 
 ```yaml
-# Per-organization limits
-rate_limiting:
-  enabled: true
-  per_organization:
-    enabled: true
-    default_rpm: 1000
-    overrides:
-      "premium-org": 10000
-      "enterprise-org": 50000
-
-# Usage tracking for billing
-usage_tracking:
-  enabled: true
-  track_inference_calls: true
-  track_gpu_hours: true
-  export_to: "prometheus"
+# Unload after 10 minutes idle
+orchestration:
+  policies:
+    evict_after_idle_seconds: 600
 ```
 
-See [configuration examples](../configs/README.md) for complete setups.
+### Multi-Tenancy
 
+```yaml
+# Track usage per organization
+organization:
+  id: "company-a"
+
+# In requests:
+curl http://localhost:8000/predict/model \
+  -d '{"prompt": "...", "organizationId": "company-a"}'
+```
+
+## Troubleshooting
+
+### Model Not Loading
+
+```bash
+# 1. Check model directory
+ls -la models/incoming/your-model/
+
+# 2. Must have config.json
+ls models/incoming/your-model/config.json
+
+# 3. Check logs
+tail -f modelium.log
+```
+
+### Inference Timeout
+
+```bash
+# Check if model is loaded
+curl http://localhost:8000/models | jq '.models[] | select(.name=="your-model")'
+
+# If status != "loaded", wait for loading to complete
+```
+
+### GPU Memory Full
+
+Models will queue if GPU is full. Check:
+
+```bash
+# GPU usage
+nvidia-smi
+
+# Loaded models
+curl http://localhost:8000/models
+
+# Force unload
+# (Coming soon: Manual unload API)
+```
+
+## Best Practices
+
+1. **Model Names**: Use descriptive names (not just "model.pt")
+2. **Directory Structure**: One model per directory
+3. **Config Files**: Always include `config.json` from HuggingFace
+4. **Monitoring**: Set up Prometheus + Grafana
+5. **Always-Loaded**: For critical models with constant traffic
+
+## Performance Tips
+
+- **Small models** (<2GB): Load instantly
+- **Large models** (>10GB): 30-120s load time
+- **vLLM**: Best for LLMs (continuous batching)
+- **Ray**: Best for custom Python models
+- **Triton**: Best for ONNX/TensorRT
+
+## Next Steps
+
+- [Architecture](architecture.md) - Understand how it works
+- [Getting Started](getting-started.md) - Installation guide
+- [DEPLOYMENT.md](../DEPLOYMENT.md) - Production deployment
+- [Examples](../examples/) - Sample code
