@@ -921,7 +921,8 @@ max_batch_size: 32
                         return {"error": str(e), "error_type": type(e).__name__}
             
             # Deploy with explicit route
-            deployment = GPT2Model.bind(str(model_path))
+            # Pass gpu_id as target_gpu parameter so the model can use the correct GPU
+            deployment = GPT2Model.bind(str(model_path), target_gpu=gpu_id)
             
             # Use serve.deploy() instead of serve.run() for better control
             # Ray Serve 2.x+ uses serve.deploy() with route_prefix
