@@ -716,18 +716,74 @@ max_batch_size: 32
             except Exception as e:
                 self.logger.warning(f"   ⚠️  Ray Serve may already be running: {e}")
             
-            # Simple deployment
+            # GPT-2 deployment with actual model loading
             @serve.deployment(
                 name=model_name,
-                ray_actor_options={"num_gpus": 1, "num_cpus": 2},
+                ray_actor_options={
+                    "num_gpus": 1 if gpu_id >= 0 else 0,
+                    "num_cpus": 2
+                },
                 num_replicas=1,
             )
-            class Model:
-                def __init__(self, path):
-                    self.path = path
+            class GPT2Model:
+                def __init__(self, model_path: str):
+                    import torch
+                    from transformers import GPT2LMHeadModel, GPT2Tokenizer
+                    import os
+                    
+                    self.logger = logging.getLogger(f"RayServe.{model_name}")
+                    self.logger.info(f"Loading GPT-2 model from {model_path}...")
+                    
+                    # Set CUDA device if GPU available
+                    self.device = f"cuda:{gpu_id}" if torch.cuda.is_available() and gpu_id >= 0 else "cpu"
+                    self.logger.info(f"Using device: {self.device}")
+                    
+                    # Load model and tokenizer
+                    try:
+                        self.tokenizer = GPT2Tokenizer.from_pretrained(model_path)
+                        self.model = GPT2LMHeadModel.from_pretrained(model_path)
+                        self.model.to(self.device)
+                        self.model.eval()
+                        self.logger.info(f"✅ GPT-2 model loaded successfully on {self.device}")
+                    except Exception as e:
+                        self.logger.error(f"❌ Failed to load model: {e}")
+                        raise
                 
-                def __call__(self, request):
-                    return {"model": self.path, "status": "ok"}
+                def __call__(self, request: dict):
+                    import torch
+                    
+                    prompt = request.get("prompt", "")
+                    max_tokens = request.get("max_tokens", 100)
+                    temperature = request.get("temperature", 0.7)
+                    
+                    try:
+                        # Tokenize input
+                        inputs = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
+                        
+                        # Generate
+                        with torch.no_grad():
+                            outputs = self.model.generate(
+                                inputs,
+                                max_length=inputs.shape[1] + max_tokens,
+                                temperature=temperature,
+                                do_sample=True,
+                                pad_token_id=self.tokenizer.eos_token_id
+                            )
+                        
+                        # Decode output
+                        generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                        
+                        # Extract only the new tokens (remove prompt)
+                        new_text = generated_text[len(prompt):].strip()
+                        
+                        return {
+                            "text": new_text,
+                            "full_text": generated_text,
+                            "model": model_name
+                        }
+                    except Exception as e:
+                        self.logger.error(f"Inference error: {e}")
+                        return {"error": str(e)}
             
             deployment = Model.bind(str(model_path))
             serve.run(deployment, name=model_name, route_prefix=f"/{model_name}")
