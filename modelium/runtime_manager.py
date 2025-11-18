@@ -922,23 +922,24 @@ max_batch_size: 32
                 self.logger.error(f"   ❌ Both Chat and Completions APIs failed for all model name variants")
                 self.logger.error(f"   Tried model names: {model_names_to_try}")
                 self.logger.error(f"   Endpoint: {endpoint}")
-                    
-                    # Try to get more info about what the model supports
-                    try:
-                        models_resp = requests.get(f"{endpoint}/v1/models", timeout=5)
-                        if models_resp.status_code == 200:
-                            models_data = models_resp.json()
-                            self.logger.error(f"   📋 Available models: {models_data}")
-                    except:
-                        pass
-                    
-                    # Return error in a format the API can handle
-                    return {
-                        "error": f"vLLM inference failed: {error_msg}",
-                        "model": actual_model_name,
-                        "endpoint": endpoint,
-                        "suggestion": "Check vLLM logs at /tmp/modelium_vllm_logs/ for details"
-                    }
+                
+                # Try to get more info about what the model supports
+                try:
+                    models_resp = requests.get(f"{endpoint}/v1/models", timeout=5)
+                    if models_resp.status_code == 200:
+                        models_data = models_resp.json()
+                        self.logger.error(f"   📋 Available models: {models_data}")
+                except:
+                    pass
+                
+                # Return error in a format the API can handle
+                return {
+                    "error": f"vLLM inference failed: Model does not support Completions or Chat Completions API",
+                    "model": actual_model_name,
+                    "tried_names": model_names_to_try,
+                    "endpoint": endpoint,
+                    "suggestion": "Check vLLM logs at /tmp/modelium_vllm_logs/ for details. GPT-2 may require special handling in vLLM 0.11+"
+                }
             
             elif runtime == "triton":
                 # Triton uses KServe v2 (simplified example)
