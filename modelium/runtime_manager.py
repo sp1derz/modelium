@@ -719,12 +719,17 @@ max_batch_size: 32
             # GPT-2 deployment with actual model loading
             # Ray Serve will automatically assign a GPU when num_gpus > 0
             # We use CUDA_VISIBLE_DEVICES to limit which GPU Ray can see
+            import torch
             import os
             ray_env = {}
-            if gpu_id >= 0 and torch.cuda.is_available():
-                # Set CUDA_VISIBLE_DEVICES so Ray only sees the GPU we want
-                ray_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-                self.logger.info(f"   Setting CUDA_VISIBLE_DEVICES={gpu_id} for Ray actor")
+            if gpu_id >= 0:
+                try:
+                    if torch.cuda.is_available():
+                        # Set CUDA_VISIBLE_DEVICES so Ray only sees the GPU we want
+                        ray_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+                        self.logger.info(f"   Setting CUDA_VISIBLE_DEVICES={gpu_id} for Ray actor")
+                except:
+                    pass
             
             @serve.deployment(
                 name=model_name,
