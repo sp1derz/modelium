@@ -137,20 +137,23 @@ class ModelWatcher:
             logger.info(f"🔍 Analyzing {model_name}...")
             self.registry.update_model(model_name, status=ModelStatus.ANALYZING)
             
+            # Convert string path to Path object
+            path = Path(file_path)
+            
             # Detect framework
-            framework = self.detector.detect(file_path)
+            framework, _ = self.detector.detect(path)
             logger.info(f"   Framework: {framework}")
             
-            # Analyze model
-            descriptor = self.analyzer.analyze(file_path, framework)
+            # Analyze model (ModelAnalyzer.analyze expects Path, not framework)
+            descriptor = self.analyzer.analyze(path, model_name=model_name)
             
             # Update registry with analysis results
             self.registry.update_model(
                 model_name,
                 status=ModelStatus.UNLOADED,
-                framework=framework,
-                model_type=descriptor.model_type if descriptor else "unknown",
-                size_bytes=os.path.getsize(file_path),
+                framework=framework.value if framework else "unknown",
+                model_type=descriptor.model_type.value if descriptor and descriptor.model_type else "unknown",
+                size_bytes=os.path.getsize(path),
                 parameters=descriptor.total_parameters if descriptor else 0,
             )
             
