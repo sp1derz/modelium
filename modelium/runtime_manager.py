@@ -504,13 +504,21 @@ class RuntimeManager:
             
             # Check health endpoint
             try:
-                resp = requests.get(f"http://localhost:{port}/health", timeout=2)
+                health_url = f"http://localhost:{port}/health"
+                resp = requests.get(health_url, timeout=2)
                 if resp.status_code == 200:
                     elapsed = time.time() - start
-                    self.logger.info(f"   ✅ vLLM ready after {elapsed:.1f}s")
+                    self.logger.info(f"   ✅ vLLM ready after {elapsed:.1f}s (health check passed)")
                     return True
-            except requests.exceptions.RequestException:
-                pass
+                else:
+                    self.logger.debug(f"   Health check returned {resp.status_code} (waiting...)")
+            except requests.exceptions.ConnectionError as e:
+                # Connection refused is normal while starting
+                if check_count % 10 == 0:  # Only log every 20 seconds
+                    self.logger.debug(f"   Health endpoint not ready yet (connection refused is normal)")
+            except requests.exceptions.RequestException as e:
+                if check_count % 10 == 0:  # Only log every 20 seconds
+                    self.logger.debug(f"   Health check error: {type(e).__name__}")
             
             check_count += 1
             if check_count % 10 == 0:  # Log every 20 seconds

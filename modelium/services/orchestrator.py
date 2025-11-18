@@ -296,12 +296,15 @@ class Orchestrator:
             logger.info(f"   ✅ GPU {gpu_id} assigned to {model_name} (will load now)")
             
             try:
+                logger.info(f"   📞 Calling runtime_manager.load_model()...")
                 success = self.runtime_manager.load_model(
                     model_name=model_name,
                     model_path=path,
                     runtime=runtime,
                     gpu_id=gpu_id
                 )
+                
+                logger.info(f"   📞 load_model() returned: {success}")
                 
                 if success:
                     logger.info(f"   ✅ {model_name} loaded successfully on GPU {gpu_id}!")
@@ -311,6 +314,7 @@ class Orchestrator:
                         target_gpu=gpu_id,  # Ensure it's set
                         loaded_at=time.time()
                     )
+                    logger.info(f"   ✅ Registry updated: {model_name} -> LOADED")
                     self.metrics.record_model_load(runtime, "success")
                     self.metrics.record_orchestration_decision("load", f"new_model_{runtime}")
                 else:
@@ -326,6 +330,7 @@ class Orchestrator:
                         target_gpu=gpu_id,  # Keep GPU visible
                         error=f"Failed to load with {runtime} (check logs)"
                     )
+                    logger.error(f"   ❌ Registry updated: {model_name} -> ERROR")
                     self.metrics.record_model_load(runtime, "error")
             except Exception as load_error:
                 logger.error(f"   ❌ Exception during model load: {load_error}", exc_info=True)
