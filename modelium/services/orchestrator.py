@@ -282,7 +282,7 @@ class Orchestrator:
             logger.info(f"   Size: {size_bytes / 1e9:.2f}GB")
             
             # 2. BRAIN DECIDES: Which runtime?
-            runtime = self._choose_runtime(analysis)
+            runtime = self._choose_runtime(analysis, model_name=model_name)
             logger.info(f"   🎯 Brain decision: {runtime}")
             
             # Register in registry (if not already registered by watcher)
