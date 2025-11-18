@@ -787,28 +787,18 @@ max_batch_size: 32
                     elif hasattr(request, "json"):  # Starlette Request object
                         # Starlette Request - need to await json() method
                         try:
-                            # Try to get JSON body (async method)
-                            if callable(request.json):
-                                # Check if it's a coroutine
-                                import inspect
-                                if inspect.iscoroutinefunction(request.json):
-                                    request_dict = await request.json()
+                            # Starlette's request.json() is always async, just await it
+                            request_dict = await request.json()
+                        except TypeError:
+                            # If it's not async (shouldn't happen, but be safe)
+                            try:
+                                request_dict = request.json()
+                            except:
+                                # Try cached _json
+                                if hasattr(request, "_json"):
+                                    request_dict = request._json
                                 else:
-                                    # Sync method
-                                    request_dict = request.json()
-                            elif hasattr(request, "_json"):
-                                # Cached parsed JSON
-                                request_dict = request._json
-                            else:
-                                # Try to read body directly
-                                if hasattr(request, "body"):
-                                    body = request.body
-                                    if hasattr(body, "__await__"):
-                                        body = await body
-                                    if isinstance(body, bytes):
-                                        body = body.decode('utf-8')
-                                    if isinstance(body, str) and body:
-                                        request_dict = json.loads(body)
+                                    request_dict = {}
                         except Exception as e:
                             self.logger.error(f"Could not parse Request object: {e}")
                             import traceback
@@ -1358,13 +1348,28 @@ max_batch_size: 32
                     
                     if resp.status_code == 200:
                         result = resp.json()
+                        self.logger.debug(f"   Ray Serve response: {result}")
+                        
                         # Check for errors in response
                         if "error" in result:
-                            self.logger.error(f"   ❌ Ray Serve returned error: {result.get('error')}")
+                            error_msg = result.get('error')
+                            self.logger.error(f"   ❌ Ray Serve returned error: {error_msg}")
+                            return result
+                        
+                        # Ensure response has expected format (text or choices)
+                        if "text" not in result and "choices" not in result:
+                            self.logger.warning(f"   ⚠️  Ray Serve response missing 'text' or 'choices': {result}")
+                            # Still return it, but log the issue
+                        
                         return result
                     else:
-                        self.logger.error(f"   ❌ Ray Serve returned {resp.status_code}: {resp.text}")
-                        return {"error": f"Ray Serve returned {resp.status_code}: {resp.text}"}
+                        error_text = resp.text[:500] if resp.text else "No error message"
+                        self.logger.error(f"   ❌ Ray Serve returned {resp.status_code}: {error_text}")
+                        try:
+                            error_json = resp.json()
+                            return {"error": f"Ray Serve returned {resp.status_code}", "details": error_json}
+                        except:
+                            return {"error": f"Ray Serve returned {resp.status_code}: {error_text}"}
                 except requests.exceptions.Timeout:
                     self.logger.error(f"   ❌ Ray Serve request timed out")
                     return {"error": "Ray Serve request timed out (model may still be loading)"}
