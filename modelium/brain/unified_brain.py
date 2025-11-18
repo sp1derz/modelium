@@ -284,6 +284,17 @@ class ModeliumBrain:
             policies=policies,
         )
         
+        # Log the full prompt being sent to brain
+        logger.info("=" * 80)
+        logger.info("🧠 BRAIN PROMPT (Full):")
+        logger.info("=" * 80)
+        logger.info("SYSTEM PROMPT:")
+        logger.info(ORCHESTRATION_SYSTEM_PROMPT)
+        logger.info("=" * 80)
+        logger.info("USER PROMPT (Current State + Policies):")
+        logger.info(user_prompt)
+        logger.info("=" * 80)
+        
         # Generate with LLM
         output = self._generate(
             system_prompt=ORCHESTRATION_SYSTEM_PROMPT,
@@ -292,8 +303,19 @@ class ModeliumBrain:
             temperature=0.3,
         )
         
+        # Log brain's response
+        logger.info("🧠 BRAIN RESPONSE (Raw):")
+        logger.info(output)
+        logger.info("=" * 80)
+        
         # Parse JSON from output
         decision = self._extract_json(output)
+        
+        # Log parsed decision
+        import json
+        logger.info("🧠 BRAIN DECISION (Parsed):")
+        logger.info(json.dumps(decision, indent=2))
+        logger.info("=" * 80)
         
         return decision
     

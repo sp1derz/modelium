@@ -132,22 +132,37 @@ class Orchestrator:
             raise RuntimeError("Brain model is required but not loaded")
         
         # Brain is available - use it (MANDATORY)
-        logger.debug("🧠 Using Brain (Qwen) for orchestration decision...")
+        logger.info("🧠 Using Brain (Qwen) for orchestration decision...")
         
-        # Build current state for brain
+        # Build current state for brain (ONLY relevant Prometheus metrics)
+        # We only send what the brain needs, not everything
+        models_data = []
+        for m in loaded_models:
+            # Get relevant metrics from Prometheus
+            qps = self.metrics.get_model_qps(m.name, m.runtime)
+            idle_seconds = self.metrics.get_model_idle_seconds(m.name, m.runtime)
+            
+            # Calculate time since load
+            time_since_load = None
+            if m.loaded_at:
+                time_since_load = time.time() - m.loaded_at
+            
+            model_data = {
+                "name": m.name,
+                "runtime": m.runtime,
+                "gpu": m.target_gpu if hasattr(m, 'target_gpu') else None,
+                "qps": qps,  # From Prometheus: modelium_model_qps
+                "idle_seconds": idle_seconds,  # From Prometheus: modelium_model_idle_seconds
+                "loaded_at": m.loaded_at,
+                "time_since_load_seconds": time_since_load,
+            }
+            models_data.append(model_data)
+            
+            logger.debug(f"   📊 Prometheus data for {m.name}: QPS={qps:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s")
+        
         current_state = {
-            "models_loaded": [
-                {
-                    "name": m.name,
-                    "runtime": m.runtime,
-                    "gpu": m.target_gpu if hasattr(m, 'target_gpu') else None,
-                    "qps": self.metrics.get_model_qps(m.name, m.runtime),
-                    "idle_seconds": self.metrics.get_model_idle_seconds(m.name, m.runtime),
-                    "loaded_at": m.loaded_at,
-                }
-                for m in loaded_models
-            ],
-            "gpu_memory_pressure": gpu_memory_pressure,
+            "models_loaded": models_data,
+            "gpu_memory_pressure": gpu_memory_pressure,  # From PyTorch/nvidia-smi
             "total_gpus": self.config.gpu.count if self.config.gpu.count else 1,
         }
         
@@ -157,6 +172,14 @@ class Orchestrator:
             "always_loaded": always_loaded,
             "evict_when_memory_above_percent": policies.evict_when_memory_above_percent,
         }
+        
+        # Log what we're sending to brain
+        logger.info("📤 Sending to Brain (Qwen):")
+        logger.info(f"   Models: {len(models_data)} loaded")
+        for m in models_data:
+            logger.info(f"      - {m['name']}: QPS={m['qps']:.2f}, idle={m['idle_seconds']:.1f}s, GPU={m['gpu']}, since_load={m.get('time_since_load_seconds', 0):.1f}s")
+        logger.info(f"   GPU memory pressure: {gpu_memory_pressure}")
+        logger.info(f"   Policies: evict_after_idle={idle_threshold}s, always_loaded={always_loaded}")
         
         # Ask brain for decisions (MANDATORY - no fallback)
         try:

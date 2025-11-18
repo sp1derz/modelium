@@ -998,46 +998,171 @@ echo "   - GPU memory: Only unload when memory is needed"
 echo "   - Policies: Respect always_loaded, priority rules"
 
 # ============================================
-# STEP 17: Test Brain Idle Model Unloading (Optional - Long Test)
+# STEP 17: Test Brain with Multiple Models (Real Unload Test)
 # ============================================
-test_step "STEP 17: Testing brain idle model management (waiting 30s)"
+test_step "STEP 17: Testing brain with 2 models (verify brain unloads idle one)"
 
 echo ""
-echo "🧠 Testing if brain unloads idle models (after grace period)..."
-echo "  This tests the brain's intelligent decision-making based on Prometheus metrics"
+echo "🧠 Testing brain's intelligent decision-making with multiple models..."
+echo "  This will:"
+echo "    1. Load GPT-2 (already loaded)"
+echo "    2. Load a 2nd model (Qwen-2.5-1.5B or another GPT-2)"
+echo "    3. Send traffic to only one model"
+echo "    4. Verify brain unloads the idle model"
 echo ""
 
-# Get initial state
-INITIAL_STATUS=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .status" 2>/dev/null || echo "unknown")
-echo "  Initial status: $INITIAL_STATUS"
+# Check if we can download a second model
+echo "📥 Downloading second model for testing..."
+SECOND_MODEL="gpt2-medium"  # Slightly larger GPT-2 variant
+SECOND_MODEL_DIR="models/incoming/$SECOND_MODEL"
 
-# Wait 30 seconds (model should stay loaded due to grace period of 120s)
-echo "  Waiting 30 seconds (grace period is 120s, so model should stay loaded)..."
-for i in {1..6}; do
-    sleep 5
-    CURRENT_STATUS=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .status" 2>/dev/null || echo "unknown")
-    IDLE=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .idle_seconds" 2>/dev/null || echo "0")
-    echo "    After $((i*5))s: status=$CURRENT_STATUS, idle=${IDLE}s"
-    
-    if [ "$CURRENT_STATUS" = "unloaded" ]; then
-        echo "  ⚠️  Model was unloaded (unexpected during grace period)"
-        break
-    fi
-done
-
-FINAL_STATUS=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .status" 2>/dev/null || echo "unknown")
-
-if [ "$FINAL_STATUS" = "loaded" ]; then
-    test_success "Brain correctly kept model loaded (within grace period)"
-    echo "  ✅ Brain respects grace period (120s) - model stays loaded"
+if [ ! -d "$SECOND_MODEL_DIR" ] || [ ! -f "$SECOND_MODEL_DIR/config.json" ]; then
+    echo "  Downloading $SECOND_MODEL from HuggingFace..."
+    python3 << 'PYEOF'
+from transformers import AutoModel, AutoTokenizer
+import os
+model_dir = os.environ.get('MODEL_DIR', 'models/incoming/gpt2-medium')
+print(f'Downloading {model_dir}...')
+try:
+    model = AutoModel.from_pretrained('gpt2-medium')
+    tokenizer = AutoTokenizer.from_pretrained('gpt2-medium')
+    model.save_pretrained(model_dir, safe_serialization=True)
+    tokenizer.save_pretrained(model_dir)
+    print(f'✅ Model downloaded successfully')
+except Exception as e:
+    print(f'❌ Download failed: {e}')
+    # Fallback: just copy gpt2 and rename it for testing
+    import shutil
+    if os.path.exists('models/incoming/gpt2'):
+        os.makedirs(model_dir, exist_ok=True)
+        for f in os.listdir('models/incoming/gpt2'):
+            shutil.copy(f'models/incoming/gpt2/{f}', f'{model_dir}/{f}')
+        print(f'✅ Using gpt2 copy as {model_dir} for testing')
+PYEOF
+    MODEL_DIR="$SECOND_MODEL_DIR" python3 -c "
+import os
+model_dir = os.environ['MODEL_DIR']
+if os.path.exists(f'{model_dir}/config.json'):
+    print('✅ Second model ready')
+    exit(0)
+else:
+    print('❌ Second model not ready')
+    exit(1)
+" || {
+    echo "  ⚠️  Could not prepare second model, skipping multi-model test"
+    SECOND_MODEL=""
+}
 else
-    echo "  ⚠️  Model status changed: $INITIAL_STATUS → $FINAL_STATUS"
-    echo "  💡 This is expected if grace period expired or GPU pressure exists"
+    echo "  ✅ Second model already exists"
 fi
 
-echo ""
-echo "💡 To fully test idle unloading, wait 2+ minutes after last request"
-echo "   The brain will unload models idle >5min IF GPU memory pressure exists"
+if [ ! -z "$SECOND_MODEL" ]; then
+    echo ""
+    echo "⏳ Waiting for second model to be detected and loaded..."
+    for i in {1..20}; do
+        MODELS=$(curl -s http://localhost:8000/models)
+        SECOND_MODEL_STATUS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .status" 2>/dev/null || echo "not_found")
+        
+        if [ "$SECOND_MODEL_STATUS" = "loaded" ]; then
+            echo "  ✅ Second model ($SECOND_MODEL) loaded successfully"
+            break
+        elif [ "$SECOND_MODEL_STATUS" = "not_found" ] && [ $i -lt 10 ]; then
+            echo "  Waiting for detection... (attempt $i/20)"
+        elif [ "$SECOND_MODEL_STATUS" = "error" ]; then
+            echo "  ❌ Second model failed to load"
+            break
+        fi
+        sleep 3
+    done
+    
+    # Check current state
+    echo ""
+    echo "📊 Current model state:"
+    MODELS=$(curl -s http://localhost:8000/models)
+    echo "$MODELS" | jq '.models[] | {name: .name, status: .status, gpu: .gpu, qps: .qps, idle_seconds: .idle_seconds}'
+    
+    # Send traffic to only FIRST_MODEL (gpt2), not SECOND_MODEL
+    echo ""
+    echo "📡 Sending 5 requests to $FIRST_MODEL (to make it active)..."
+    for i in {1..5}; do
+        curl -s -X POST http://localhost:8000/predict/$FIRST_MODEL \
+          -H "Content-Type: application/json" \
+          -d "{\"prompt\": \"Active model test $i\", \"max_tokens\": 5, \"organizationId\": \"test-company\"}" > /dev/null
+        sleep 0.5
+    done
+    echo "  ✅ Sent 5 requests to $FIRST_MODEL"
+    
+    # Don't send any requests to SECOND_MODEL - it should be idle
+    
+    # Wait for brain to make decision (decision_interval is 10s)
+    echo ""
+    echo "⏳ Waiting for brain to make orchestration decision (checking every 10s)..."
+    echo "  Brain should detect:"
+    echo "    - $FIRST_MODEL: Active (QPS > 0) → KEEP"
+    echo "    - $SECOND_MODEL: Idle (QPS = 0) → EVICT (if idle > threshold)"
+    
+    INITIAL_SECOND_STATUS=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .status" 2>/dev/null || echo "unknown")
+    echo "  Initial $SECOND_MODEL status: $INITIAL_SECOND_STATUS"
+    
+    # Wait up to 2 minutes for brain to unload (decision every 10s, grace period 120s)
+    # But we'll check after grace period + a few decision cycles
+    echo "  Waiting 130 seconds (grace period 120s + 10s for decision)..."
+    for i in {1..13}; do
+        sleep 10
+        MODELS=$(curl -s http://localhost:8000/models)
+        SECOND_STATUS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .status" 2>/dev/null || echo "unknown")
+        SECOND_IDLE=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .idle_seconds" 2>/dev/null || echo "0")
+        FIRST_QPS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .qps" 2>/dev/null || echo "0")
+        SECOND_QPS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .qps" 2>/dev/null || echo "0")
+        
+        echo "    After $((i*10))s: $SECOND_MODEL status=$SECOND_STATUS, idle=${SECOND_IDLE}s, QPS=$SECOND_QPS"
+        echo "                      $FIRST_MODEL QPS=$FIRST_QPS (should be > 0)"
+        
+        if [ "$SECOND_STATUS" = "unloaded" ]; then
+            echo ""
+            echo "  ✅ Brain unloaded $SECOND_MODEL (idle model)!"
+            test_success "Brain correctly unloaded idle model"
+            break
+        fi
+    done
+    
+    FINAL_SECOND_STATUS=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .status" 2>/dev/null || echo "unknown")
+    
+    if [ "$FINAL_SECOND_STATUS" = "unloaded" ]; then
+        echo ""
+        echo "  ✅ Brain successfully unloaded idle model!"
+        echo "  📊 Final state:"
+        MODELS=$(curl -s http://localhost:8000/models)
+        echo "$MODELS" | jq '.models[] | {name: .name, status: .status, qps: .qps, idle_seconds: .idle_seconds}'
+    else
+        echo ""
+        echo "  ⚠️  Brain did not unload $SECOND_MODEL (status: $FINAL_SECOND_STATUS)"
+        echo "  💡 This could mean:"
+        echo "     - Grace period not expired yet (120s)"
+        echo "     - Brain decided to keep it (low GPU pressure)"
+        echo "     - Check logs for brain decisions"
+        echo ""
+        echo "  📊 Final state:"
+        MODELS=$(curl -s http://localhost:8000/models)
+        echo "$MODELS" | jq '.models[] | {name: .name, status: .status, qps: .qps, idle_seconds: .idle_seconds}'
+    fi
+    
+    # Check logs for brain activity
+    echo ""
+    echo "🔍 Checking logs for brain decisions..."
+    if [ -f "modelium_test.log" ]; then
+        echo "  Brain prompts sent:"
+        grep -A 5 "BRAIN PROMPT\|Sending to Brain" modelium_test.log | tail -20 || echo "    (not found)"
+        echo ""
+        echo "  Brain decisions:"
+        grep -A 3 "BRAIN DECISION\|Brain made.*decisions" modelium_test.log | tail -20 || echo "    (not found)"
+        echo ""
+        echo "  Prometheus data sent to brain:"
+        grep "Prometheus data for\|Sending to Brain" modelium_test.log | tail -10 || echo "    (not found)"
+    fi
+else
+    echo "  ⚠️  Skipping multi-model test (second model not available)"
+fi
 
 # ============================================
 # CLEANUP
