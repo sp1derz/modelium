@@ -79,17 +79,35 @@ That's it! No other configuration needed.
 
 **What**: High-performance LLM serving with continuous batching  
 **When**: For GPT, Llama, Mistral, Qwen, and other LLMs  
-**Requirements**: Linux + CUDA + Python development headers
+**Requirements**: Linux + CUDA + Python development headers + CUDA toolkit
 
 ```bash
-# Install Python development headers (REQUIRED for CUDA compilation)
+# 1. Install Python development headers (REQUIRED - must match your Python version)
 # Amazon Linux 2023:
+# For Python 3.9 (system default):
 sudo yum install python3-devel
 
-# Ubuntu/Debian:
-sudo apt-get install python3-dev
+# For Python 3.11 (if using venv with 3.11):
+# Note: python311-devel may not be available on Amazon Linux 2023
+# Solution: Use Python 3.9 for venv to match system headers:
+python3.9 -m venv venv
+source venv/bin/activate
 
-# Install vLLM
+# Ubuntu/Debian:
+sudo apt-get install python3-dev  # For system Python
+# Or: sudo apt-get install python3.11-dev  # For specific version
+
+# 2. Install CUDA toolkit (REQUIRED for vLLM compilation)
+# Amazon Linux 2023:
+sudo yum install cuda-toolkit-12-6  # Adjust version as needed
+
+# Ubuntu/Debian:
+sudo apt-get install nvidia-cuda-toolkit
+
+# Verify CUDA:
+nvcc --version
+
+# 3. Install vLLM
 pip install vllm
 
 # Configure
@@ -99,6 +117,11 @@ vllm:
 
 # That's it!
 ```
+
+**⚠️ Important Notes:**
+- Python headers must match your Python version (3.9 vs 3.11)
+- CUDA toolkit is required for vLLM to compile CUDA kernels at runtime
+- If compilation fails, check that both Python headers and CUDA toolkit are installed
 
 **✅ AUTO-SPAWNED**: Modelium automatically spawns vLLM processes when loading models. You do **NOT** need to:
 - ❌ Start vLLM containers manually

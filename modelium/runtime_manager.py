@@ -186,10 +186,26 @@ class RuntimeManager:
                     self.logger.warning(f"   ⚠️  Python development headers not found in standard locations")
                     self.logger.warning(f"   Python version: {py_version}")
                     self.logger.warning(f"   Checked: {', '.join(str(p) for p in possible_paths if p)}")
-                    self.logger.warning(f"   vLLM may fail to compile CUDA code without headers")
+                    self.logger.warning(f"   vLLM requires Python headers to compile CUDA kernels")
                     self.logger.warning(f"   Install: sudo yum install python{py_version.split('.')[0]}-devel  # Amazon Linux")
                     self.logger.warning(f"   Or: sudo apt-get install python{py_version.split('.')[0]}-dev  # Ubuntu/Debian")
+                    self.logger.warning(f"   ⚠️  vLLM compilation will likely fail without matching headers")
                     # Don't return False - let vLLM try anyway, it might work
+                
+                # Check for CUDA toolkit (required for vLLM compilation)
+                try:
+                    import subprocess
+                    nvcc_result = subprocess.run(['nvcc', '--version'], capture_output=True, text=True, timeout=2)
+                    if nvcc_result.returncode == 0:
+                        self.logger.debug(f"   ✅ CUDA toolkit found")
+                    else:
+                        self.logger.warning(f"   ⚠️  CUDA toolkit (nvcc) not found")
+                        self.logger.warning(f"   vLLM requires CUDA toolkit for compilation")
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    self.logger.warning(f"   ⚠️  CUDA toolkit (nvcc) not found")
+                    self.logger.warning(f"   vLLM requires CUDA toolkit for compilation")
+                except Exception:
+                    pass  # Ignore other errors
             except Exception as e:
                 self.logger.warning(f"   ⚠️  Could not check for Python headers: {e}")
                 # Continue anyway - might work
