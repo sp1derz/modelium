@@ -780,25 +780,42 @@ max_batch_size: 32
                     max_tokens = request.get("max_tokens", 100)
                     temperature = request.get("temperature", 0.7)
                     
+                    if not prompt:
+                        return {"error": "Prompt is required"}
+                    
                     try:
                         # Tokenize input
                         inputs = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
+                        
+                        if inputs.shape[1] == 0:
+                            return {"error": "Empty input after tokenization"}
                         
                         # Generate
                         with torch.no_grad():
                             outputs = self.model.generate(
                                 inputs,
                                 max_length=inputs.shape[1] + max_tokens,
+                                min_length=inputs.shape[1] + 1,  # At least generate 1 new token
                                 temperature=temperature,
                                 do_sample=True,
-                                pad_token_id=self.tokenizer.eos_token_id
+                                pad_token_id=self.tokenizer.eos_token_id,
+                                eos_token_id=self.tokenizer.eos_token_id
                             )
+                        
+                        # Check if we got output
+                        if outputs.shape[0] == 0 or outputs.shape[1] == 0:
+                            return {"error": "Model generated empty output"}
                         
                         # Decode output
                         generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
                         
                         # Extract only the new tokens (remove prompt)
-                        new_text = generated_text[len(prompt):].strip()
+                        # Handle case where generated_text might be shorter than prompt
+                        if len(generated_text) > len(prompt):
+                            new_text = generated_text[len(prompt):].strip()
+                        else:
+                            # If generated text is same or shorter, return it all
+                            new_text = generated_text.strip()
                         
                         return {
                             "text": new_text,
@@ -806,8 +823,10 @@ max_batch_size: 32
                             "model": model_name
                         }
                     except Exception as e:
+                        import traceback
                         self.logger.error(f"Inference error: {e}")
-                        return {"error": str(e)}
+                        self.logger.error(f"Traceback: {traceback.format_exc()}")
+                        return {"error": str(e), "error_type": type(e).__name__}
             
             deployment = GPT2Model.bind(str(model_path))
             serve.run(deployment, name=model_name, route_prefix=f"/{model_name}")
@@ -1256,13 +1275,38 @@ max_batch_size: 32
                 return resp.json()
             
             elif runtime == "ray":
-                # Ray custom endpoint
-                resp = requests.post(
-                    info['endpoint'],
-                    json={"prompt": prompt},
-                    timeout=30
-                )
-                return resp.json()
+                # Ray Serve endpoint
+                endpoint = info.get('endpoint')
+                if not endpoint:
+                    self.logger.error(f"   ❌ No endpoint found for Ray model")
+                    return {"error": "No endpoint configured for Ray model"}
+                
+                try:
+                    resp = requests.post(
+                        endpoint,
+                        json={
+                            "prompt": prompt,
+                            "max_tokens": max_tokens,
+                            "temperature": kwargs.get("temperature", 0.7)
+                        },
+                        timeout=60  # Longer timeout for model loading/generation
+                    )
+                    
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        # Check for errors in response
+                        if "error" in result:
+                            self.logger.error(f"   ❌ Ray Serve returned error: {result.get('error')}")
+                        return result
+                    else:
+                        self.logger.error(f"   ❌ Ray Serve returned {resp.status_code}: {resp.text}")
+                        return {"error": f"Ray Serve returned {resp.status_code}: {resp.text}"}
+                except requests.exceptions.Timeout:
+                    self.logger.error(f"   ❌ Ray Serve request timed out")
+                    return {"error": "Ray Serve request timed out (model may still be loading)"}
+                except Exception as e:
+                    self.logger.error(f"   ❌ Ray Serve request failed: {e}")
+                    return {"error": str(e)}
             
         except Exception as e:
             import traceback
