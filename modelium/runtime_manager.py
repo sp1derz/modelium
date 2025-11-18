@@ -732,7 +732,7 @@ max_batch_size: 32
                     self.logger.warning(f"   ⚠️  Could not query vLLM /v1/models: {e}, using stored: {actual_model_name}")
                 
                 # Try /v1/chat/completions first (preferred in vLLM 0.10+)
-            chat_completions_tried = False
+                chat_completions_tried = False
             try:
                 self.logger.debug(f"   Trying Chat Completions API with model: {actual_model_name}")
                 resp = requests.post(
