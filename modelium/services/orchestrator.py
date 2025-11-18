@@ -201,9 +201,6 @@ class Orchestrator:
         # This should never be reached if brain is working
         logger.error("❌ Brain decision returned no actions - this should not happen")
         raise RuntimeError("Brain decision returned no actions")
-        
-        # INTELLIGENT DECISIONS for each model
-        for model in loaded_models:
             # Get comprehensive metrics
             idle_seconds = self.metrics.get_model_idle_seconds(model.name, model.runtime)
             qps = self.metrics.get_model_qps(model.name, model.runtime)
