@@ -1,0 +1,67 @@
+# Modelium Configuration Example
+# Copy this file to modelium.yaml and edit as needed
+
+# Organization (for multi-tenancy)
+organization:
+  id: "my-company"
+  name: "My Company"
+
+# GPU Configuration
+gpu:
+  enabled: auto  # auto-detect, or set to true/false
+
+# Runtime Configuration
+# Enable the runtime(s) you have installed
+
+# vLLM - For LLMs (requires: pip install vllm)
+vllm:
+  enabled: true  # ← Set to true if you installed vLLM
+
+# Triton - For all models (requires: docker run tritonserver)
+triton:
+  enabled: false  # ← Set to true if you started Triton server
+  endpoint: "http://localhost:8003"
+
+# Ray Serve - For general models (requires: pip install ray[serve])
+ray_serve:
+  enabled: false  # ← Set to true if you installed Ray
+  endpoint: "http://localhost:8002"
+
+# Model Discovery
+orchestration:
+  enabled: true
+  
+  model_discovery:
+    # Where to watch for new models
+    watch_directories:
+      - "/models/incoming"  # ← Drop models here
+    
+    scan_interval_seconds: 30  # How often to check for new models
+    
+    supported_formats:
+      - "safetensors"
+      - "bin"
+      - "pt"
+      - "pth"
+      - "onnx"
+  
+  # Orchestration Policies
+  policies:
+    # When to unload idle models
+    evict_after_idle_seconds: 300  # 5 minutes (0 = never unload)
+    
+    # Models that should never be unloaded
+    always_loaded: []
+      # - "production-model"
+      # - "critical-llm"
+
+# Metrics (Prometheus)
+metrics:
+  enabled: true
+  port: 9090  # Prometheus endpoint at http://localhost:9090/metrics
+
+# Modelium Brain (decision making)
+modelium_brain:
+  enabled: true  # Use rule-based decisions
+  fallback_to_rules: true  # Always use rules (LLM brain not yet available)
+
