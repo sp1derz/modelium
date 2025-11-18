@@ -785,7 +785,7 @@ max_batch_size: 32
                         self.logger.error(f"Inference error: {e}")
                         return {"error": str(e)}
             
-            deployment = Model.bind(str(model_path))
+            deployment = GPT2Model.bind(str(model_path))
             serve.run(deployment, name=model_name, route_prefix=f"/{model_name}")
             
             endpoint = f"http://localhost:8002/{model_name}"
