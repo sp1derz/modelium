@@ -238,47 +238,63 @@ class RuntimeManager:
                 self.logger.info(f"   Waiting for vLLM to start (PID: {process.pid})...")
                 self.logger.info(f"   vLLM stderr log: {stderr_path}")
                 if self._wait_for_vllm_ready(port, timeout=180, process=process, stderr_path=stderr_path):
-                self._vllm_processes[model_name] = process
-                self._loaded_models[model_name] = {
-                    "runtime": "vllm",
-                    "endpoint": f"http://localhost:{port}",
-                    "port": port,
-                    "gpu": gpu_id,
-                    "pid": process.pid,
-                }
-                self.logger.info(f"   ✅ {model_name} ready on port {port}")
-                return True
-            else:
-                self.logger.error(f"   ❌ vLLM failed to start on port {port}")
-                # Check if process is still running
-                if process.poll() is None:
-                    self.logger.error(f"   Process still running but not responding")
-                else:
-                    self.logger.error(f"   Process exited with code: {process.returncode}")
-                    # Read stderr from file
-                    try:
-                        with open(stderr_path, 'r') as f:
-                            stderr_output = f.read()
-                            if stderr_output:
-                                self.logger.error(f"   vLLM stderr output:")
-                                # Show last 100 lines (most recent errors)
-                                lines = stderr_output.strip().split('\n')
-                                for line in lines[-100:]:
-                                    if line.strip():
-                                        self.logger.error(f"      {line}")
-                    except Exception as e:
-                        self.logger.error(f"   Could not read stderr file {stderr_path}: {e}")
-                try:
-                    process.kill()
-                except:
-                    pass
-                finally:
-                    # Clean up stderr file
+                    self._vllm_processes[model_name] = process
+                    self._loaded_models[model_name] = {
+                        "runtime": "vllm",
+                        "endpoint": f"http://localhost:{port}",
+                        "port": port,
+                        "gpu": gpu_id,
+                        "pid": process.pid,
+                    }
+                    self.logger.info(f"   ✅ {model_name} ready on port {port}")
+                    # Clean up stderr file on success
                     try:
                         import os
                         os.unlink(stderr_path)
                     except:
                         pass
+                    return True
+                else:
+                    self.logger.error(f"   ❌ vLLM failed to start on port {port}")
+                    # Check if process is still running
+                    if process.poll() is None:
+                        self.logger.error(f"   Process still running but not responding")
+                    else:
+                        self.logger.error(f"   Process exited with code: {process.returncode}")
+                        # Read stderr from file
+                        try:
+                            with open(stderr_path, 'r') as f:
+                                stderr_output = f.read()
+                                if stderr_output:
+                                    self.logger.error(f"   vLLM stderr output:")
+                                    # Show last 100 lines (most recent errors)
+                                    lines = stderr_output.strip().split('\n')
+                                    for line in lines[-100:]:
+                                        if line.strip():
+                                            self.logger.error(f"      {line}")
+                        except Exception as e:
+                            self.logger.error(f"   Could not read stderr file {stderr_path}: {e}")
+                    try:
+                        process.kill()
+                    except:
+                        pass
+                    finally:
+                        # Clean up stderr file
+                        try:
+                            import os
+                            os.unlink(stderr_path)
+                        except:
+                            pass
+                    return False
+            except Exception as e:
+                self.logger.error(f"Error spawning vLLM process: {e}")
+                # Clean up stderr file on exception
+                try:
+                    import os
+                    if 'stderr_path' in locals():
+                        os.unlink(stderr_path)
+                except:
+                    pass
                 return False
                 
         except Exception as e:
