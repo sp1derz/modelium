@@ -85,37 +85,71 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     
     if ! python3 -c "import sysconfig; import os; h = os.path.join(sysconfig.get_path('include'), 'Python.h'); assert os.path.exists(h), f'Missing: {h}'" 2>/dev/null; then
         echo "⚠️  Python development headers not found for Python $PYTHON_VERSION!"
-        echo "   Installing python${PYTHON_MAJOR}${PYTHON_MINOR}-devel..."
+        echo "   Installing Python $PYTHON_VERSION development headers..."
         
         if command -v yum &>/dev/null; then
-            # Try version-specific package first
+            # Amazon Linux 2023 - try multiple approaches
+            echo "   Trying to install python${PYTHON_MAJOR}${PYTHON_MINOR}-devel..."
             if sudo yum install -y python${PYTHON_MAJOR}${PYTHON_MINOR}-devel 2>/dev/null; then
                 echo "   ✅ Installed python${PYTHON_MAJOR}${PYTHON_MINOR}-devel"
-            elif sudo yum install -y python${PYTHON_MAJOR}-devel 2>/dev/null; then
-                echo "   ✅ Installed python${PYTHON_MAJOR}-devel (may work for ${PYTHON_VERSION})"
             else
-                echo "   ⚠️  Could not install version-specific headers"
-                echo "   💡 Solution: Use Python ${PYTHON_MAJOR}.9 for venv to match system headers"
-                echo "   Or: Install Python ${PYTHON_VERSION} from source with development headers"
+                echo "   ⚠️  python${PYTHON_MAJOR}${PYTHON_MINOR}-devel not in default repos"
+                echo "   💡 Installing Python $PYTHON_VERSION from Amazon Linux Extras or EPEL..."
+                
+                # Try Amazon Linux Extras (if available)
+                if command -v amazon-linux-extras &>/dev/null; then
+                    echo "   Checking Amazon Linux Extras for Python $PYTHON_VERSION..."
+                    sudo amazon-linux-extras install -y python${PYTHON_MAJOR}.${PYTHON_MINOR} 2>/dev/null || true
+                fi
+                
+                # Try EPEL
+                if ! rpm -q epel-release &>/dev/null; then
+                    echo "   Installing EPEL repository..."
+                    sudo yum install -y epel-release 2>/dev/null || true
+                fi
+                
+                # Try again with EPEL
+                sudo yum install -y python${PYTHON_MAJOR}${PYTHON_MINOR}-devel 2>/dev/null || {
+                    echo "   ❌ Could not install Python $PYTHON_VERSION headers"
+                    echo "   💡 Solutions:"
+                    echo "      1. Install Python $PYTHON_VERSION from source:"
+                    echo "         https://www.python.org/downloads/"
+                    echo "      2. Use a Python 3.10+ container/image"
+                    echo "      3. Install python${PYTHON_MAJOR}${PYTHON_MINOR} from alternative source"
+                }
             fi
         elif command -v apt-get &>/dev/null; then
+            # Ubuntu/Debian - usually has version-specific packages
             if sudo apt-get install -y python${PYTHON_MAJOR}.${PYTHON_MINOR}-dev 2>/dev/null; then
                 echo "   ✅ Installed python${PYTHON_MAJOR}.${PYTHON_MINOR}-dev"
-            elif sudo apt-get install -y python${PYTHON_MAJOR}-dev 2>/dev/null; then
-                echo "   ✅ Installed python${PYTHON_MAJOR}-dev (may work for ${PYTHON_VERSION})"
             else
-                echo "   ⚠️  Could not install version-specific headers"
+                echo "   ⚠️  Could not install python${PYTHON_MAJOR}.${PYTHON_MINOR}-dev"
+                echo "   Try: sudo apt-get update && sudo apt-get install python${PYTHON_MAJOR}.${PYTHON_MINOR}-dev"
             fi
         else
-            echo "   ⚠️  Please install Python development headers manually:"
-            echo "   Amazon Linux: sudo yum install python${PYTHON_MAJOR}${PYTHON_MINOR}-devel"
-            echo "   Ubuntu/Debian: sudo apt-get install python${PYTHON_MAJOR}.${PYTHON_MINOR}-dev"
+            echo "   ⚠️  Please install Python development headers manually"
         fi
     else
         echo "✅ Python development headers found"
     fi
     
     echo "Linux detected - installing vLLM..."
+    
+    # Check Python version - vLLM 0.10+ requires Python 3.10+
+    PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+    PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
+    PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
+    
+    if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]; then
+        echo "❌ Python $PYTHON_VERSION detected - vLLM requires Python 3.10+"
+        echo "   Please recreate venv with Python 3.10 or 3.11:"
+        echo "   python3.10 -m venv venv  # or python3.11"
+        echo "   source venv/bin/activate"
+        test_fail "Python 3.10+ required for vLLM"
+        exit 1
+    fi
+    
+    echo "Python $PYTHON_VERSION detected - installing latest vLLM..."
     echo "Running: pip install vllm"
     pip install -q vllm || {
         test_fail "vLLM installation failed (may need CUDA or Python headers)"

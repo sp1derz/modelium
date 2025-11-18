@@ -82,15 +82,17 @@ That's it! No other configuration needed.
 **Requirements**: Linux + CUDA + Python development headers + CUDA toolkit
 
 ```bash
-# 1. Install Python development headers (REQUIRED - must match your Python version)
+# 1. Install Python 3.10+ (REQUIRED for vLLM 0.10+)
 # Amazon Linux 2023:
-# For Python 3.9 (system default):
-sudo yum install python3-devel
+# Option A: Install Python 3.11 from Amazon Linux Extras or EPEL
+sudo yum install -y epel-release
+sudo yum install -y python3.11 python3.11-devel python3.11-pip
 
-# For Python 3.11 (if using venv with 3.11):
-# Note: python311-devel may not be available on Amazon Linux 2023
-# Solution: Use Python 3.9 for venv to match system headers:
-python3.9 -m venv venv
+# Option B: Use deadsnakes PPA (if available) or compile from source
+# See: https://www.python.org/downloads/
+
+# Create venv with Python 3.10+
+python3.11 -m venv venv  # or python3.10
 source venv/bin/activate
 
 # Ubuntu/Debian:
@@ -107,7 +109,9 @@ sudo apt-get install nvidia-cuda-toolkit
 # Verify CUDA:
 nvcc --version
 
-# 3. Install vLLM
+# 3. Install vLLM (REQUIRED - Python 3.10+)
+# vLLM 0.10+ requires Python 3.10+ (uses | union type syntax)
+python3 --version  # Must be 3.10 or higher
 pip install vllm
 
 # Configure
