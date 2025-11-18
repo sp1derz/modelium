@@ -256,19 +256,85 @@ fi
 # ============================================
 test_step "STEP 9: Downloading GPT-2 model (small, ~500MB)"
 
-if [ ! -d "models/incoming/gpt2" ]; then
-    echo "Downloading from HuggingFace..."
-    git clone --depth 1 https://huggingface.co/gpt2 models/incoming/gpt2 2>/dev/null || {
-        echo "Git clone failed, trying with transformers..."
-        python3 << 'PYEOF'
+MODEL_DIR="models/incoming/gpt2"
+
+# Check if model exists and is valid
+MODEL_VALID=false
+if [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
+    # Check if safetensors file exists and is not empty
+    if [ -f "$MODEL_DIR/model.safetensors" ]; then
+        SAFETENSORS_SIZE=$(stat -f%z "$MODEL_DIR/model.safetensors" 2>/dev/null || stat -c%s "$MODEL_DIR/model.safetensors" 2>/dev/null || echo "0")
+        if [ "$SAFETENSORS_SIZE" -gt 1000000 ]; then  # > 1MB
+            # Try to validate the file
+            python3 -c "
+from safetensors import safe_open
+try:
+    with safe_open('$MODEL_DIR/model.safetensors', framework='pt') as f:
+        keys = list(f.keys())[:1]
+    print('✅ Model file is valid')
+    exit(0)
+except Exception as e:
+    print(f'❌ Model file is corrupted: {e}')
+    exit(1)
+" 2>/dev/null && MODEL_VALID=true || {
+                echo "⚠️  Model file appears corrupted (size: ${SAFETENSORS_SIZE} bytes)"
+                MODEL_VALID=false
+            }
+        else
+            echo "⚠️  Model file is too small ($SAFETENSORS_SIZE bytes), likely corrupted"
+            MODEL_VALID=false
+        fi
+    else
+        echo "⚠️  model.safetensors not found"
+        MODEL_VALID=false
+    fi
+fi
+
+if [ "$MODEL_VALID" = false ]; then
+    echo "Downloading GPT-2 model from HuggingFace..."
+    # Remove corrupted model if it exists
+    if [ -d "$MODEL_DIR" ]; then
+        echo "   Removing corrupted/incomplete model files..."
+        rm -rf "$MODEL_DIR"
+    fi
+    
+    mkdir -p "$MODEL_DIR"
+    python3 << 'PYEOF'
 from transformers import AutoModel, AutoTokenizer
-model = AutoModel.from_pretrained("gpt2", cache_dir="./models/incoming/gpt2")
-tokenizer = AutoTokenizer.from_pretrained("gpt2", cache_dir="./models/incoming/gpt2")
+import os
+model_dir = os.environ.get('MODEL_DIR', 'models/incoming/gpt2')
+print('Downloading GPT-2 model from HuggingFace...')
+print('This may take a few minutes (~500MB)...')
+model = AutoModel.from_pretrained('gpt2')
+tokenizer = AutoTokenizer.from_pretrained('gpt2')
+print('Saving model with safe_serialization=True...')
+model.save_pretrained(model_dir, safe_serialization=True)
+tokenizer.save_pretrained(model_dir)
+print('✅ Model downloaded and saved successfully')
 PYEOF
+    MODEL_DIR="$MODEL_DIR" python3 -c "
+import os
+model_dir = os.environ['MODEL_DIR']
+if os.path.exists(f'{model_dir}/model.safetensors'):
+    size = os.path.getsize(f'{model_dir}/model.safetensors')
+    size_mb = size / 1024 / 1024
+    print(f'   Model file size: {size_mb:.1f}MB')
+    if size < 1000000:
+        print('❌ Downloaded model file is too small, download may have failed')
+        exit(1)
+    else:
+        print('✅ Model file size looks good')
+        exit(0)
+else:
+    print('❌ model.safetensors not found after download')
+    exit(1)
+" || {
+        test_fail "Failed to download or validate GPT-2 model"
+        exit 1
     }
     test_success "GPT-2 model downloaded"
 else
-    test_success "GPT-2 model already exists"
+    test_success "GPT-2 model already exists and is valid"
 fi
 
 # ============================================
