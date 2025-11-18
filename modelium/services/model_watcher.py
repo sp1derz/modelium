@@ -144,6 +144,22 @@ class ModelWatcher:
         else:
             model_name = "model"
         
+        # If this is a watch directory itself, use a better name
+        if dir_path in self.watch_directories:
+            # Try to derive name from config.json
+            try:
+                import json
+                config_path = dir_path / "config.json"
+                if config_path.exists():
+                    with open(config_path) as f:
+                        config = json.load(f)
+                        model_name = config.get("model_type", config.get("_name_or_path", "model"))
+                        logger.info(f"📁 Watch directory is a model: {model_name} at {dir_path}")
+                else:
+                    model_name = dir_path.name or "model"
+            except:
+                model_name = dir_path.name or "model"
+        
         logger.info(f"📁 Discovered model directory: {model_name} at {dir_path}")
         
         # Register in registry

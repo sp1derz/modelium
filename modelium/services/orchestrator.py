@@ -298,13 +298,26 @@ class Orchestrator:
                 self.metrics.record_model_load(runtime, "success")
                 self.metrics.record_orchestration_decision("load", f"new_model_{runtime}")
             else:
-                logger.error(f"   ❌ Failed to load {model_name}")
-                self.registry.update_model(model_name, status=ModelStatus.ERROR)
+                logger.error(f"   ❌ Failed to load {model_name} with {runtime}")
+                logger.error(f"   Model path: {path}")
+                logger.error(f"   GPU: {gpu_id}")
+                logger.error(f"   Check server logs above for detailed error messages")
+                self.registry.update_model(
+                    model_name, 
+                    status=ModelStatus.ERROR,
+                    error=f"Failed to load with {runtime}"
+                )
                 self.metrics.record_model_load(runtime, "error")
                 
         except Exception as e:
-            logger.error(f"Error processing {model_name}: {e}")
-            self.registry.update_model(model_name, status=ModelStatus.ERROR)
+            logger.error(f"❌ Error processing {model_name}: {e}", exc_info=True)
+            logger.error(f"   Model path: {model_path}")
+            logger.error(f"   Full traceback above")
+            self.registry.update_model(
+                model_name, 
+                status=ModelStatus.ERROR,
+                error=str(e)
+            )
     
     def _choose_runtime(self, analysis) -> str:
         """

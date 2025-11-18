@@ -73,6 +73,7 @@ class ModeliumBrain:
             }.get(self.dtype, torch.float16)
             
             logger.info(f"   Loading model on {self.device} ({self.dtype})...")
+            logger.info(f"   Model will be downloaded/cached from HuggingFace: {self.model_name}")
             
             # Load model
             self.model = AutoModelForCausalLM.from_pretrained(
@@ -81,6 +82,15 @@ class ModeliumBrain:
                 device_map=self.device,
                 trust_remote_code=True,
             )
+            
+            # Show where model was cached
+            try:
+                from transformers.utils import TRANSFORMERS_CACHE
+                import os
+                cache_dir = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+                logger.info(f"   ✅ Model cached at: {cache_dir}/hub/models--{self.model_name.replace('/', '--')}")
+            except:
+                pass
             
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
