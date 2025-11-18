@@ -389,16 +389,6 @@ def serve(
                 )
                 
                 logger.debug(f"   📊 Metrics recorded: QPS will update, idle_seconds reset")
-                else:
-                    logger.warning(f"   ⚠️  Result is not a dict: {type(result)}")
-                
-                metrics.record_request(
-                    model=model_name,
-                    runtime=model.runtime,
-                    latency_ms=latency_ms,
-                    status="success" if not has_error else "error",
-                    gpu=model.target_gpu
-                )
                 
                 if has_error:
                     error_msg = result.get("error", "Unknown error")
