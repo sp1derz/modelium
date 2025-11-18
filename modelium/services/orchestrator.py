@@ -454,28 +454,56 @@ class Orchestrator:
         return enabled_runtimes[0] if enabled_runtimes else "vllm"
     
     def _choose_gpu(self) -> int:
-        """Choose GPU with most free memory."""
+        """Choose GPU with most free memory, avoiding GPUs already in use."""
+        # Get GPUs already in use by loaded models
+        loaded_models = self.registry.get_loaded_models()
+        used_gpus = set()
+        for m in loaded_models:
+            if hasattr(m, 'target_gpu') and m.target_gpu is not None:
+                used_gpus.add(m.target_gpu)
+                logger.debug(f"   GPU {m.target_gpu} is in use by {m.name}")
+        
         # Try PyTorch first
         try:
             import torch
             if torch.cuda.is_available():
                 gpu_count = torch.cuda.device_count()
                 logger.info(f"   🔍 PyTorch detected {gpu_count} GPU(s)")
+                logger.info(f"   GPUs in use: {list(used_gpus) if used_gpus else 'none'}")
                 
                 if gpu_count > 0:
-                    # Simple: Choose GPU with lowest utilization
+                    # Prefer unused GPUs, then choose GPU with lowest utilization
                     best_gpu = 0
                     min_allocated = float('inf')
+                    found_unused = False
                     
+                    # First pass: Find unused GPU with lowest utilization
                     for i in range(gpu_count):
-                        allocated = torch.cuda.memory_allocated(i)
-                        reserved = torch.cuda.memory_reserved(i)
-                        logger.debug(f"   GPU {i}: {allocated / 1e9:.2f}GB allocated, {reserved / 1e9:.2f}GB reserved")
-                        if allocated < min_allocated:
-                            min_allocated = allocated
-                            best_gpu = i
+                        if i not in used_gpus:
+                            allocated = torch.cuda.memory_allocated(i)
+                            reserved = torch.cuda.memory_reserved(i)
+                            logger.debug(f"   GPU {i} (unused): {allocated / 1e9:.2f}GB allocated, {reserved / 1e9:.2f}GB reserved")
+                            if allocated < min_allocated:
+                                min_allocated = allocated
+                                best_gpu = i
+                                found_unused = True
                     
-                    logger.info(f"   ✅ Selected GPU {best_gpu} via PyTorch (lowest utilization: {min_allocated / 1e9:.2f}GB)")
+                    # If no unused GPU found, use the one with lowest utilization
+                    if not found_unused:
+                        logger.warning(f"   ⚠️  All GPUs are in use, choosing GPU with lowest utilization")
+                        min_allocated = float('inf')
+                        for i in range(gpu_count):
+                            allocated = torch.cuda.memory_allocated(i)
+                            reserved = torch.cuda.memory_reserved(i)
+                            logger.debug(f"   GPU {i}: {allocated / 1e9:.2f}GB allocated, {reserved / 1e9:.2f}GB reserved")
+                            if allocated < min_allocated:
+                                min_allocated = allocated
+                                best_gpu = i
+                    
+                    if best_gpu in used_gpus:
+                        logger.warning(f"   ⚠️  Selected GPU {best_gpu} is already in use (may cause conflicts)")
+                    else:
+                        logger.info(f"   ✅ Selected GPU {best_gpu} (unused, lowest utilization: {min_allocated / 1e9:.2f}GB)")
                     return best_gpu
         except Exception as e:
             logger.warning(f"   ⚠️  PyTorch GPU detection failed: {e}")

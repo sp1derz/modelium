@@ -259,7 +259,7 @@ class ModeliumMetrics:
         """
         Get current QPS for a model (from internal tracking).
         
-        Uses a sliding window: requests in last 10 seconds.
+        Uses a sliding window: requests in last 5 seconds (more responsive).
         """
         model_key = f"{model}:{runtime}"
         now = time.time()
@@ -272,13 +272,14 @@ class ModeliumMetrics:
         
         # If we have recent requests, calculate QPS
         if elapsed > 0 and count > 0:
-            # Use a 10-second window for QPS calculation
-            # Reset count every 10 seconds
-            if elapsed >= 10.0:
-                # Reset for next window
+            # Use a 5-second window for QPS calculation (more responsive)
+            # Reset count every 5 seconds
+            if elapsed >= 5.0:
+                # Reset for next window, but return QPS for the window that just ended
+                qps = count / 5.0  # Average QPS over the 5-second window
                 self._model_request_counts[model_key] = 0
                 self._last_qps_update[model_key] = now
-                return 0.0
+                return qps
             else:
                 # Calculate QPS over the elapsed time
                 qps = count / elapsed if elapsed > 0 else 0.0
