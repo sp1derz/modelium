@@ -155,6 +155,21 @@ class RuntimeManager:
                 self.logger.error(f"   Install: pip install vllm")
                 return False
             
+            # Check for Python development headers (required for CUDA compilation)
+            try:
+                import sysconfig
+                include_dir = sysconfig.get_path('include')
+                python_h = Path(include_dir) / "Python.h"
+                if not python_h.exists():
+                    self.logger.error(f"   ❌ Python development headers not found!")
+                    self.logger.error(f"   Missing: {python_h}")
+                    self.logger.error(f"   Install: sudo yum install python3-devel  # Amazon Linux")
+                    self.logger.error(f"   Or: sudo apt-get install python3-dev      # Ubuntu/Debian")
+                    return False
+            except Exception as e:
+                self.logger.warning(f"   ⚠️  Could not check for Python headers: {e}")
+                # Continue anyway - might work
+            
             # Allocate port
             port = self._vllm_next_port
             self._vllm_next_port += 1

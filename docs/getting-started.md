@@ -79,9 +79,16 @@ That's it! No other configuration needed.
 
 **What**: High-performance LLM serving with continuous batching  
 **When**: For GPT, Llama, Mistral, Qwen, and other LLMs  
-**Requirements**: Linux + CUDA
+**Requirements**: Linux + CUDA + Python development headers
 
 ```bash
+# Install Python development headers (REQUIRED for CUDA compilation)
+# Amazon Linux 2023:
+sudo yum install python3-devel
+
+# Ubuntu/Debian:
+sudo apt-get install python3-dev
+
 # Install vLLM
 pip install vllm
 

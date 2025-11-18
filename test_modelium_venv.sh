@@ -73,10 +73,29 @@ test_step "STEP 3: Checking vLLM installation"
 
 # Check if on Linux (vLLM requires Linux+CUDA)
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    echo "Linux detected - checking Python development headers..."
+    
+    # Check for Python headers (required for vLLM CUDA compilation)
+    if ! python3 -c "import sysconfig; import os; h = os.path.join(sysconfig.get_path('include'), 'Python.h'); assert os.path.exists(h), f'Missing: {h}'" 2>/dev/null; then
+        echo "⚠️  Python development headers not found!"
+        echo "   Installing python3-devel..."
+        if command -v yum &>/dev/null; then
+            sudo yum install -y python3-devel || echo "⚠️  Failed to install python3-devel (may need sudo)"
+        elif command -v apt-get &>/dev/null; then
+            sudo apt-get install -y python3-dev || echo "⚠️  Failed to install python3-dev (may need sudo)"
+        else
+            echo "⚠️  Please install Python development headers manually:"
+            echo "   Amazon Linux: sudo yum install python3-devel"
+            echo "   Ubuntu/Debian: sudo apt-get install python3-dev"
+        fi
+    else
+        echo "✅ Python development headers found"
+    fi
+    
     echo "Linux detected - installing vLLM..."
     echo "Running: pip install vllm"
     pip install -q vllm || {
-        test_fail "vLLM installation failed (may need CUDA)"
+        test_fail "vLLM installation failed (may need CUDA or Python headers)"
         echo "Falling back to Ray for testing..."
         echo "Running: pip install ray[serve]"
         pip install -q ray[serve]
