@@ -259,8 +259,19 @@ def serve(
                     temperature=request.temperature,
                 )
                 
+                # Safety: ensure result is never None
+                if result is None:
+                    logger.error(f"   ❌ Inference returned None!")
+                    result = {"error": "Inference returned None"}
+                
                 logger.debug(f"   Inference result type: {type(result)}")
-                logger.debug(f"   Inference result keys: {result.keys() if isinstance(result, dict) else 'not a dict'}")
+                logger.debug(f"   Inference result: {result}")
+                if isinstance(result, dict):
+                    logger.debug(f"   Inference result keys: {list(result.keys())}")
+                else:
+                    logger.warning(f"   ⚠️  Result is not a dict: {type(result)}, value: {result}")
+                    # Convert to dict if it's not
+                    result = {"error": f"Inference returned non-dict: {type(result)}", "raw_result": str(result)}
                 
                 # Record metrics
                 latency_ms = (time.time() - start_time) * 1000
