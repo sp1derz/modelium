@@ -289,11 +289,12 @@ class RuntimeManager:
             self.logger.info(f"   Command: {' '.join(cmd)}")
             self.logger.info(f"   Environment: CUDA_VISIBLE_DEVICES={gpu_id}")
             
-            # Use a temporary file to capture stderr (avoids buffer issues)
-            import tempfile
-            stderr_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.log')
-            stderr_path = stderr_file.name
-            stderr_file.close()
+            # Use a named log file in a visible location (not tempfile)
+            import os
+            log_dir = Path("/tmp/modelium_vllm_logs")
+            log_dir.mkdir(exist_ok=True)
+            stderr_path = str(log_dir / f"vllm_{model_name}_{port}.log")
+            self.logger.info(f"   📝 vLLM stderr will be written to: {stderr_path}")
             
             try:
                 self.logger.info(f"   📝 Starting subprocess...")
@@ -308,23 +309,30 @@ class RuntimeManager:
                 
                 self.logger.info(f"   ✅ Process spawned! PID: {process.pid}")
                 self.logger.info(f"   📋 vLLM stderr log: {stderr_path}")
+                self.logger.info(f"   💡 To view logs in real-time: tail -f {stderr_path}")
                 self.logger.info(f"   ⏳ Waiting for vLLM to be ready (max 180s)...")
                 
                 # Wait a moment to see if it crashes immediately
-                time.sleep(1)
+                time.sleep(2)
                 if process.poll() is not None:
                     self.logger.error(f"   ❌ Process died immediately with code {process.returncode}")
                     # Read stderr immediately
                     try:
-                        with open(stderr_path, 'r') as f:
-                            stderr_output = f.read()
-                            if stderr_output:
-                                self.logger.error(f"   vLLM stderr (immediate failure):")
-                                for line in stderr_output.strip().split('\n'):
-                                    if line.strip():
-                                        self.logger.error(f"      {line}")
-                    except:
-                        pass
+                        if os.path.exists(stderr_path):
+                            with open(stderr_path, 'r') as f:
+                                stderr_output = f.read()
+                                if stderr_output:
+                                    self.logger.error(f"   vLLM stderr (immediate failure - full output):")
+                                    self.logger.error(f"   {'='*60}")
+                                    for line in stderr_output.strip().split('\n'):
+                                        if line.strip():
+                                            self.logger.error(f"   {line}")
+                                    self.logger.error(f"   {'='*60}")
+                                    self.logger.error(f"   Full log file: {stderr_path}")
+                        else:
+                            self.logger.error(f"   ⚠️  Stderr log file not created: {stderr_path}")
+                    except Exception as e:
+                        self.logger.error(f"   Could not read stderr: {e}")
                     return False
                 
                 # Wait for ready
@@ -387,12 +395,9 @@ class RuntimeManager:
                     except:
                         pass
                     finally:
-                        # Clean up stderr file
-                        try:
-                            import os
-                            os.unlink(stderr_path)
-                        except:
-                            pass
+                        # DON'T delete stderr file - keep it for debugging
+                        self.logger.error(f"   📋 Stderr log preserved at: {stderr_path}")
+                        self.logger.error(f"   💡 View with: cat {stderr_path}")
                     return False
             except Exception as e:
                 self.logger.error(f"Error spawning vLLM process: {e}")
@@ -439,24 +444,87 @@ class RuntimeManager:
         """Wait for vLLM to be ready."""
         start = time.time()
         check_count = 0
+        last_stderr_size = 0
+        
         while time.time() - start < timeout:
             # Check if process died
             if process and process.poll() is not None:
-                self.logger.error(f"   vLLM process died with code {process.returncode}")
+                self.logger.error(f"")
+                self.logger.error(f"   ❌ vLLM PROCESS CRASHED!")
+                self.logger.error(f"   Exit code: {process.returncode}")
+                self.logger.error(f"   PID: {process.pid}")
+                
                 # Read stderr from file if available
                 if stderr_path:
                     try:
-                        with open(stderr_path, 'r') as f:
-                            stderr_output = f.read()
-                            if stderr_output:
-                                self.logger.error(f"   vLLM stderr (last 50 lines):")
-                                lines = stderr_output.strip().split('\n')
-                                for line in lines[-50:]:
-                                    if line.strip():
-                                        self.logger.error(f"      {line}")
+                        import os
+                        if os.path.exists(stderr_path):
+                            with open(stderr_path, 'r') as f:
+                                stderr_output = f.read()
+                                if stderr_output:
+                                    self.logger.error(f"   {'='*60}")
+                                    self.logger.error(f"   vLLM STDERR OUTPUT (full):")
+                                    self.logger.error(f"   {'='*60}")
+                                    for line in stderr_output.strip().split('\n'):
+                                        if line.strip():
+                                            self.logger.error(f"   {line}")
+                                    self.logger.error(f"   {'='*60}")
+                                    self.logger.error(f"   📋 Full log file: {stderr_path}")
+                                    self.logger.error(f"   💡 View with: cat {stderr_path}")
+                                else:
+                                    self.logger.error(f"   ⚠️  Stderr file is empty: {stderr_path}")
+                        else:
+                            self.logger.error(f"   ⚠️  Stderr file not found: {stderr_path}")
                     except Exception as e:
                         self.logger.error(f"   Could not read stderr: {e}")
+                else:
+                    self.logger.error(f"   ⚠️  No stderr path provided")
                 return False
+            
+            # Periodically check stderr for errors (even if process is still running)
+            if stderr_path and check_count % 5 == 0:  # Every 10 seconds
+                try:
+                    import os
+                    if os.path.exists(stderr_path):
+                        current_size = os.path.getsize(stderr_path)
+                        if current_size > last_stderr_size:
+                            # New content in stderr - check for errors
+                            with open(stderr_path, 'r') as f:
+                                f.seek(last_stderr_size)
+                                new_content = f.read()
+                                if new_content:
+                                    # Check for common error patterns
+                                    error_keywords = ["error", "exception", "traceback", "failed", "fatal"]
+                                    for line in new_content.split('\n'):
+                                        if any(kw in line.lower() for kw in error_keywords):
+                                            self.logger.warning(f"   ⚠️  Error detected in vLLM logs: {line.strip()[:200]}")
+                            last_stderr_size = current_size
+                except:
+                    pass
+            
+            # Check health endpoint
+            try:
+                resp = requests.get(f"http://localhost:{port}/health", timeout=2)
+                if resp.status_code == 200:
+                    elapsed = time.time() - start
+                    self.logger.info(f"   ✅ vLLM ready after {elapsed:.1f}s")
+                    return True
+            except requests.exceptions.RequestException:
+                pass
+            
+            check_count += 1
+            if check_count % 10 == 0:  # Log every 20 seconds
+                elapsed = time.time() - start
+                self.logger.info(f"   Still waiting... ({elapsed:.0f}s elapsed, PID: {process.pid if process else 'N/A'})")
+                if stderr_path:
+                    self.logger.info(f"   💡 Monitor logs: tail -f {stderr_path}")
+            
+            time.sleep(2)
+        
+        self.logger.error(f"   Timeout after {timeout}s")
+        if stderr_path:
+            self.logger.error(f"   📋 Check logs: {stderr_path}")
+        return False
             
             # Check health endpoint
             try:
