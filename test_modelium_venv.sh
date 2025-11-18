@@ -59,6 +59,11 @@ pip install -q --upgrade pip
 
 echo "Running: pip install -e \".[all]\""
 pip install -q -e ".[all]"
+
+# Install accelerate (required for brain model loading)
+echo "Running: pip install accelerate"
+pip install -q accelerate || echo "⚠️  accelerate install failed (may need CUDA)"
+
 test_success "Modelium installed"
 
 # ============================================
