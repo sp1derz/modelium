@@ -79,20 +79,60 @@ def serve(
         console.print("Press Ctrl+C to stop")
         console.print()
         
-        # Initialize services
-        console.print("🔧 Initializing services...")
+        # Initialize runtime connectors
+        console.print("🔧 Connecting to runtimes...")
+        from modelium.connectors import VLLMConnector, TritonConnector, RayConnector
         from modelium.services.model_registry import ModelRegistry
         from modelium.services.model_watcher import ModelWatcher
-        from modelium.services.vllm_service import VLLMService
         from modelium.services.orchestrator import Orchestrator
         
+        # Initialize connectors for enabled runtimes
+        connectors = {}
+        
+        if cfg.vllm.enabled:
+            console.print(f"   Checking vLLM at {cfg.vllm.endpoint}...")
+            vllm = VLLMConnector(cfg.vllm.endpoint, cfg.vllm.timeout)
+            if vllm.health_check():
+                connectors["vllm"] = vllm
+                console.print(f"   ✅ vLLM connected")
+            else:
+                console.print(f"   ⚠️  vLLM not available (will retry)")
+        
+        if cfg.triton.enabled:
+            console.print(f"   Checking Triton at {cfg.triton.endpoint}...")
+            triton = TritonConnector(cfg.triton.endpoint, cfg.triton.timeout)
+            if triton.health_check():
+                connectors["triton"] = triton
+                console.print(f"   ✅ Triton connected")
+            else:
+                console.print(f"   ⚠️  Triton not available (will retry)")
+        
+        if cfg.ray_serve.enabled:
+            console.print(f"   Checking Ray Serve at {cfg.ray_serve.endpoint}...")
+            ray_serve = RayConnector(cfg.ray_serve.endpoint, cfg.ray_serve.timeout)
+            if ray_serve.health_check():
+                connectors["ray_serve"] = ray_serve
+                console.print(f"   ✅ Ray Serve connected")
+            else:
+                console.print(f"   ⚠️  Ray Serve not available (will retry)")
+        
+        if not connectors:
+            console.print("\n[red]❌ No runtimes available![/red]")
+            console.print("\nStart at least one runtime:")
+            console.print("  vLLM:      docker run --gpus all -p 8001:8000 vllm/vllm-openai:latest --model gpt2")
+            console.print("  Triton:    docker run --gpus all -p 8003:8000 nvcr.io/nvidia/tritonserver:latest")
+            console.print("  Ray Serve: docker run --gpus all -p 8002:8000 rayproject/ray:latest")
+            raise typer.Exit(1)
+        
+        console.print()
+        
         registry = ModelRegistry()
-        vllm_service = VLLMService(host=host, port=cfg.vllm.port)
         
         # Create orchestrator
         orchestrator = Orchestrator(
             brain=brain if cfg.modelium_brain.enabled else None,
-            vllm_service=vllm_service,
+            connectors=connectors,
+            registry=registry,
             config=cfg,
         )
         
@@ -163,27 +203,67 @@ def serve(
             if not model:
                 raise HTTPException(status_code=404, detail="Model not found")
             
-            if model.status != "loaded":
+            if model.status.value != "loaded":
                 raise HTTPException(
                     status_code=503, 
-                    detail=f"Model not loaded (status: {model.status})"
+                    detail=f"Model not loaded (status: {model.status.value})"
                 )
             
             # Record request
             registry.record_request(model_name)
             
-            # Run inference
-            result = vllm_service.inference(
-                model_name=model_name,
-                prompt=request.prompt,
-                max_tokens=request.max_tokens,
-                temperature=request.temperature,
-            )
+            # Route to correct runtime based on model's assigned runtime
+            runtime = model.runtime
+            if runtime not in connectors:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Runtime {runtime} not available"
+                )
             
-            if "error" in result:
-                raise HTTPException(status_code=500, detail=result["error"])
+            connector = connectors[runtime]
             
-            return result
+            # Run inference based on runtime type
+            try:
+                if runtime == "vllm":
+                    result = connector.inference(
+                        model=model_name,
+                        prompt=request.prompt,
+                        max_tokens=request.max_tokens,
+                        temperature=request.temperature,
+                    )
+                elif runtime == "triton":
+                    # Triton requires tensor inputs - this is a simplified example
+                    # In production, you'd need proper input preprocessing
+                    result = connector.inference(
+                        model=model_name,
+                        inputs=[{
+                            "name": "INPUT",
+                            "shape": [1],
+                            "datatype": "BYTES",
+                            "data": [request.prompt]
+                        }]
+                    )
+                elif runtime == "ray_serve":
+                    result = connector.predict(
+                        model_name=model_name,
+                        data={"prompt": request.prompt},
+                        max_tokens=request.max_tokens,
+                        temperature=request.temperature,
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Unknown runtime: {runtime}"
+                    )
+                
+                if "error" in result:
+                    raise HTTPException(status_code=500, detail=result["error"])
+                
+                return result
+                
+            except Exception as e:
+                console.print(f"[red]Inference error: {e}[/red]")
+                raise HTTPException(status_code=500, detail=str(e))
         
         @app.get("/health")
         async def health():

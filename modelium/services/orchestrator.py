@@ -11,8 +11,10 @@ from typing import Optional
 
 from modelium.brain import ModeliumBrain
 from modelium.services.model_registry import ModelRegistry, ModelStatus
-from modelium.services.vllm_service import VLLMService
 from modelium.config import ModeliumConfig
+from modelium.core.analyzers.huggingface_analyzer import HuggingFaceAnalyzer
+from pathlib import Path
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +24,14 @@ class Orchestrator:
     Intelligent orchestrator that uses the brain to manage GPU resources.
     
     Runs continuously in background, making decisions every N seconds.
+    Connects to external runtimes (vLLM, Triton, Ray) via HTTP.
     """
     
     def __init__(
         self,
         brain: Optional[ModeliumBrain],
-        vllm_service: VLLMService,
+        connectors: Dict[str, Any],
+        registry: ModelRegistry,
         config: ModeliumConfig,
     ):
         """
@@ -35,13 +39,15 @@ class Orchestrator:
         
         Args:
             brain: Modelium brain for decision making
-            vllm_service: vLLM service for model management
+            connectors: Dict of runtime connectors {"vllm": VLLMConnector, ...}
+            registry: Model registry for tracking models
             config: Modelium configuration
         """
         self.brain = brain
-        self.vllm_service = vllm_service
+        self.connectors = connectors
+        self.registry = registry
         self.config = config
-        self.registry = ModelRegistry()
+        self.analyzer = HuggingFaceAnalyzer()
         
         self._running = False
         self._thread = None
@@ -143,7 +149,13 @@ class Orchestrator:
                 logger.error(f"Error executing action {action_type} for {model_name}: {e}")
     
     def _load_model(self, model_name: str, gpu_id: int):
-        """Load a model using vLLM."""
+        """
+        Mark model as loaded if it's available in the runtime.
+        
+        NOTE: Actual model loading happens in the runtime (vLLM/Triton/Ray).
+        Users should start their runtime with models pre-loaded.
+        This method just verifies the model is accessible and marks it as loaded.
+        """
         model = self.registry.get_model(model_name)
         if not model:
             logger.error(f"Model {model_name} not found in registry")
@@ -153,49 +165,136 @@ class Orchestrator:
             logger.info(f"{model_name} already loaded")
             return
         
-        logger.info(f"🔼 Loading {model_name} to GPU {gpu_id}...")
+        logger.info(f"🔼 Checking if {model_name} is loaded in {model.runtime}...")
         self.registry.update_model(model_name, status=ModelStatus.LOADING)
         
-        # Load with vLLM
-        result = self.vllm_service.load_model(
-            model_name=model_name,
-            model_path=model.path,
-            gpu_id=gpu_id,
-        )
-        
-        if result.get("status") == "loaded":
-            self.registry.update_model(
-                model_name,
-                status=ModelStatus.LOADED,
-                target_gpu=gpu_id,
-                port=result.get("port"),
-                loaded_at=time.time(),
-            )
-            logger.info(f"   ✅ {model_name} loaded")
-        else:
+        # Check if model is available in runtime
+        runtime = model.runtime
+        if runtime not in self.connectors:
+            logger.error(f"Runtime {runtime} not available")
             self.registry.update_model(
                 model_name,
                 status=ModelStatus.ERROR,
-                error=result.get("error"),
+                error=f"Runtime {runtime} not connected",
             )
-            logger.error(f"   ❌ Failed to load {model_name}")
+            return
+        
+        connector = self.connectors[runtime]
+        
+        # Check if model is loaded in runtime
+        try:
+            if runtime == "vllm":
+                models = connector.list_models()
+                if model_name in models or any(model_name in m for m in models):
+                    self.registry.update_model(
+                        model_name,
+                        status=ModelStatus.LOADED,
+                        target_gpu=gpu_id,
+                        loaded_at=time.time(),
+                    )
+                    logger.info(f"   ✅ {model_name} available in vLLM")
+                else:
+                    self.registry.update_model(
+                        model_name,
+                        status=ModelStatus.ERROR,
+                        error=f"Model not found in vLLM. Please start vLLM with: --model {model.path}",
+                    )
+                    logger.warning(f"   ⚠️  {model_name} not loaded in vLLM yet")
+            
+            elif runtime == "triton":
+                if connector.get_model_ready(model_name):
+                    self.registry.update_model(
+                        model_name,
+                        status=ModelStatus.LOADED,
+                        target_gpu=gpu_id,
+                        loaded_at=time.time(),
+                    )
+                    logger.info(f"   ✅ {model_name} ready in Triton")
+                else:
+                    # Try to load it via Triton's API
+                    if connector.load_model(model_name):
+                        self.registry.update_model(
+                            model_name,
+                            status=ModelStatus.LOADED,
+                            target_gpu=gpu_id,
+                            loaded_at=time.time(),
+                        )
+                        logger.info(f"   ✅ {model_name} loaded in Triton")
+                    else:
+                        self.registry.update_model(
+                            model_name,
+                            status=ModelStatus.ERROR,
+                            error="Failed to load in Triton",
+                        )
+                        logger.error(f"   ❌ Failed to load {model_name} in Triton")
+            
+            elif runtime == "ray_serve":
+                deployments = connector.list_deployments()
+                if model_name in deployments:
+                    self.registry.update_model(
+                        model_name,
+                        status=ModelStatus.LOADED,
+                        target_gpu=gpu_id,
+                        loaded_at=time.time(),
+                    )
+                    logger.info(f"   ✅ {model_name} deployed in Ray Serve")
+                else:
+                    self.registry.update_model(
+                        model_name,
+                        status=ModelStatus.ERROR,
+                        error=f"Model not deployed in Ray Serve",
+                    )
+                    logger.warning(f"   ⚠️  {model_name} not deployed in Ray Serve yet")
+                    
+        except Exception as e:
+            logger.error(f"Error checking {model_name}: {e}")
+            self.registry.update_model(
+                model_name,
+                status=ModelStatus.ERROR,
+                error=str(e),
+            )
     
     def _unload_model(self, model_name: str):
-        """Unload a model."""
+        """
+        Unload a model from runtime (if supported).
+        
+        NOTE: Not all runtimes support dynamic unloading.
+        """
         model = self.registry.get_model(model_name)
         if not model or model.status != ModelStatus.LOADED:
             return
         
-        logger.info(f"🔽 Unloading {model_name}...")
+        runtime = model.runtime
+        if runtime not in self.connectors:
+            return
+        
+        connector = self.connectors[runtime]
+        
+        logger.info(f"🔽 Unloading {model_name} from {runtime}...")
         self.registry.update_model(model_name, status=ModelStatus.UNLOADING)
         
-        if self.vllm_service.unload_model(model_name):
-            self.registry.update_model(
-                model_name,
-                status=ModelStatus.UNLOADED,
-                unloaded_at=time.time(),
-            )
-        else:
+        try:
+            # Only Triton supports easy unloading
+            if runtime == "triton":
+                if connector.unload_model(model_name):
+                    self.registry.update_model(
+                        model_name,
+                        status=ModelStatus.UNLOADED,
+                        unloaded_at=time.time(),
+                    )
+                    logger.info(f"   ✅ {model_name} unloaded")
+                else:
+                    self.registry.update_model(model_name, status=ModelStatus.ERROR)
+            else:
+                logger.warning(f"   Runtime {runtime} doesn't support dynamic unloading")
+                # Mark as unloaded anyway (user needs to restart runtime)
+                self.registry.update_model(
+                    model_name,
+                    status=ModelStatus.UNLOADED,
+                    unloaded_at=time.time(),
+                )
+        except Exception as e:
+            logger.error(f"Error unloading {model_name}: {e}")
             self.registry.update_model(model_name, status=ModelStatus.ERROR)
     
     def _get_gpu_memory_state(self) -> dict:
@@ -233,44 +332,77 @@ class Orchestrator:
         """
         Callback when a new model is discovered.
         
-        Triggers brain to decide if/how to load it.
+        Analyzes model and decides which runtime to use.
         """
-        logger.info(f"📋 Planning deployment for {model_name}...")
+        logger.info(f"📋 Analyzing {model_name}...")
         
-        model = self.registry.get_model(model_name)
-        if not model:
-            return
-        
-        # Get model descriptor
-        model_descriptor = {
-            "name": model_name,
-            "framework": model.framework or "unknown",
-            "model_type": model.model_type or "unknown",
-            "parameters": model.parameters,
-            "resources": {"memory_bytes": model.size_bytes},
-        }
-        
-        # Ask brain for deployment plan
         try:
-            plan = self.brain.generate_conversion_plan(
-                model_descriptor=model_descriptor,
-                available_gpus=self.config.gpu.count or 4,
-                gpu_memory=[70, 75, 78, 80],  # TODO: Query actual GPU memory
-            )
-            
-            # Update model with plan
-            self.registry.update_model(
-                model_name,
-                runtime=plan.get("runtime"),
-                target_gpu=plan.get("target_gpu"),
-            )
-            
-            logger.info(f"   Plan: {plan.get('runtime')} on GPU {plan.get('target_gpu')}")
-            
-            # Auto-load if enabled
-            if self.config.deployment.auto_deploy:
-                self._load_model(model_name, plan.get("target_gpu", 0))
+            # Analyze HuggingFace model
+            path = Path(model_path)
+            if (path / "config.json").exists():
+                analysis = self.analyzer.analyze(path)
+                
+                # Determine best runtime based on model type
+                runtime = self._choose_runtime(analysis)
+                
+                # Get model size
+                import os
+                size_bytes = sum(
+                    os.path.getsize(os.path.join(dirpath, filename))
+                    for dirpath, _, filenames in os.walk(path)
+                    for filename in filenames
+                )
+                
+                # Register model with analysis results
+                self.registry.register_model(
+                    name=model_name,
+                    path=str(path),
+                    framework="pytorch" if analysis.architecture else "unknown",
+                    model_type=analysis.model_type.value if analysis.model_type else "unknown",
+                    runtime=runtime,
+                    size_bytes=size_bytes,
+                    parameters=analysis.resources.parameters if analysis.resources else 0,
+                )
+                
+                logger.info(f"   Detected: {analysis.architecture or 'Unknown'}")
+                logger.info(f"   Runtime: {runtime}")
+                logger.info(f"   Size: {size_bytes / 1e9:.2f}GB")
+                
+                # Auto-load if enabled and runtime is available
+                if self.config.deployment.auto_deploy and runtime in self.connectors:
+                    self._load_model(model_name, 0)
+            else:
+                logger.warning(f"   No config.json found, skipping")
                 
         except Exception as e:
-            logger.error(f"Error planning deployment for {model_name}: {e}")
+            logger.error(f"Error analyzing {model_name}: {e}")
+    
+    def _choose_runtime(self, analysis) -> str:
+        """
+        Choose best runtime based on model analysis and available connectors.
+        
+        Args:
+            analysis: HuggingFace analysis result
+        
+        Returns:
+            Runtime name ("vllm", "triton", "ray_serve")
+        """
+        # Priority: vLLM for LLMs, Ray for general models, Triton as fallback
+        arch = (analysis.architecture or "").lower()
+        
+        # LLM architectures - prefer vLLM
+        if any(k in arch for k in ["gpt", "llama", "mistral", "qwen", "t5", "bert"]):
+            if "vllm" in self.connectors:
+                return "vllm"
+        
+        # Vision/other models - prefer Ray Serve
+        if "ray_serve" in self.connectors:
+            return "ray_serve"
+        
+        # Fallback to Triton
+        if "triton" in self.connectors:
+            return "triton"
+        
+        # Default to first available
+        return list(self.connectors.keys())[0] if self.connectors else "vllm"
 

@@ -30,32 +30,23 @@ gpu:
   memory_fraction: 0.9  # How much GPU memory to use (0.0-1.0)
 
 # vLLM Settings (for LLMs)
+# Users should run vLLM separately: docker run --gpus all -p 8001:8000 vllm/vllm-openai:latest --model <model>
 vllm:
   enabled: true
-  tensor_parallel_size: null  # null = auto-detect based on available GPUs
-  dtype: "auto"  # auto, float16, bfloat16, float32
-  max_model_len: null  # null = use model default
-  gpu_memory_utilization: 0.9
-  quantization: null  # null, "awq", "gptq", "squeezellm"
-  enable_lora: false
-  max_loras: 1
-  trust_remote_code: true
-  port: 8000
-  host: "0.0.0.0"
+  endpoint: "http://localhost:8001"  # Where vLLM server is running
+  health_check_path: "/health"
+  model_load_path: "/v1/models"  # vLLM model loading endpoint
+  inference_path: "/v1/completions"  # OpenAI-compatible endpoint
+  timeout: 300  # Model loading timeout in seconds
 
 # Ray Serve Settings (for general models)
+# Users should run Ray Serve separately: docker run --gpus all -p 8002:8000 rayproject/ray:latest
 ray_serve:
   enabled: true
-  num_cpus_per_replica: 2.0
-  num_gpus_per_replica: 1.0  # 0.0 for CPU-only
-  max_concurrent_queries: 100
-  autoscaling:
-    enabled: true
-    min_replicas: 1
-    max_replicas: 10
-    target_num_ongoing_requests_per_replica: 5
-  port: 8001
-  host: "0.0.0.0"
+  endpoint: "http://localhost:8002"  # Where Ray Serve is running
+  health_check_path: "/-/healthz"
+  inference_path: "/predict"  # Custom Ray Serve endpoint
+  timeout: 300
 
 # TensorRT Settings (for max performance)
 tensorrt:
@@ -67,18 +58,14 @@ tensorrt:
   dynamic_shapes: true
 
 # Triton Inference Server Settings
+# Users should run Triton: docker run --gpus all -p 8003:8000 nvcr.io/nvidia/tritonserver:latest
 triton:
   enabled: true
-  port: 8002
-  grpc_port: 8003
-  http_port: 8002
-  metrics_port: 8004
-  model_repository: "/models"
-  strict_model_config: false
-  dynamic_batching:
-    enabled: true
-    max_queue_delay_microseconds: 100
-    preferred_batch_sizes: [1, 2, 4, 8, 16, 32]
+  endpoint: "http://localhost:8003"  # Where Triton is running
+  health_check_path: "/v2/health/ready"
+  model_repository_path: "/v2/repository/models"  # Model management endpoint
+  inference_path: "/v2/models/{model}/infer"  # KServe v2 protocol
+  timeout: 300
 
 # Model Conversion Settings
 conversion:

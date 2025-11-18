@@ -1,328 +1,369 @@
 # Modelium 🧠
 
-**AI-Powered Model Serving Platform with Intelligent GPU Orchestration**
+**AI-Orchestrated Multi-Runtime Model Serving Platform**
 
-Modelium is an open-source library that automatically discovers, analyzes, and deploys ML models with maximum GPU utilization. Just drop your models in a folder, and let the AI brain handle everything.
+Modelium is an intelligent orchestrator that connects your ML models to the best inference runtimes (vLLM, Triton, Ray Serve). Drop a model in a folder, and Modelium automatically analyzes it, chooses the optimal runtime, and routes requests - all while maximizing GPU utilization.
 
-## ✨ Key Features
+## ✨ What Makes Modelium Different
 
-- 🤖 **AI Brain**: Fine-tuned LLM makes intelligent deployment decisions
-- 🔄 **Auto-Discovery**: Drop models in a folder, automatic deployment
-- 🚀 **Multi-Runtime**: Supports vLLM, Ray Serve, TensorRT, Triton
-- 📊 **Smart Orchestration**: Dynamic model loading/unloading for max GPU utilization
-- ⚡ **Fast Swapping**: GPUDirect Storage support for rapid model loading
-- 🎯 **Zero Config**: Minimal configuration, maximum automation
-- 🔒 **Multi-Tenant**: Built-in organization tracking and usage monitoring
+- **🤖 AI Brain**: Optional fine-tuned LLM makes intelligent runtime selection and orchestration decisions
+- **🔌 Runtime Agnostic**: Connects to vLLM, Triton, and Ray Serve via HTTP - no reimplementation
+- **🔄 Auto-Discovery**: Drop HuggingFace models in a folder → automatic analysis → smart routing
+- **📊 Smart Routing**: Routes inference requests to the correct runtime based on model type
+- **🎯 Unified API**: Single API endpoint for all your models, regardless of runtime
+- **🔒 Enterprise-Ready**: Multi-tenant, usage tracking, rate limiting built-in
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       Modelium Server                        │
+│  ┌────────────┐  ┌──────────────┐  ┌────────────────────┐  │
+│  │  Analyzer  │→ │ Modelium     │→ │  Request Router    │  │
+│  │  (config.  │  │  Brain       │  │  (runtime-aware)   │  │
+│  │   json)    │  │  (optional)  │  │                    │  │
+│  └────────────┘  └──────────────┘  └────────────────────┘  │
+│         ↑               ↑                     ↓              │
+│         │               │        ┌────────────────────────┐ │
+│  ┌──────────────────────┴────────┤   Runtime Connectors   │ │
+│  │  Model Discovery (watches    │   (HTTP clients)      │ │
+│  │  /models/incoming/)           └────────────────────────┘ │
+│  └────────────────────────────────────┬─────┬───────┬──────┘
+└───────────────────────────────────────┼─────┼───────┼───────┘
+                                        ↓     ↓       ↓
+         ┌──────────────────────────────┴─────┴───────┴─────┐
+         │        External Runtime Services (User-Run)     │
+         ├─────────────────┬───────────────┬────────────────┤
+         │   vLLM Server   │ Triton Server │ Ray Serve      │
+         │   (LLMs)        │ (All Models)  │ (General)      │
+         │   Port 8001     │ Port 8003     │ Port 8002      │
+         └─────────────────┴───────────────┴────────────────┘
+```
+
+**How It Works:**
+1. **You start** your preferred runtimes (vLLM/Triton/Ray) with your preferred configuration
+2. **Modelium connects** to them via HTTP APIs
+3. **Drop a model** in `/models/incoming/`
+4. **Modelium analyzes** it (reads `config.json`, detects architecture)
+5. **Brain decides** which runtime is best (or uses rules)
+6. **Requests route** automatically to the correct runtime
 
 ## 🚀 Quick Start
 
-### Option 1: Docker (Recommended)
+### Prerequisites
 
-⚠️ **First**: Build the Docker image - see [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
+- **Python 3.11+**
+- **CUDA 12.1+** (for GPU)
+- **At least one runtime** (vLLM, Triton, or Ray Serve)
+
+### Step 1: Start Your Runtime(s)
+
+Choose one or more runtimes:
 
 ```bash
-# Clone the repo
+# Option A: vLLM (Best for LLMs like GPT, Llama, Mistral)
+docker run --gpus all -p 8001:8000 \
+  vllm/vllm-openai:latest \
+  --model gpt2 \
+  --dtype auto
+
+# Option B: Triton (NVIDIA's high-performance server)
+docker run --gpus all -p 8003:8000 \
+  nvcr.io/nvidia/tritonserver:latest \
+  tritonserver --model-repository=/models
+
+# Option C: Ray Serve (For general Python models)
+docker run --gpus all -p 8002:8000 \
+  rayproject/ray:latest \
+  ray start --head
+
+# You can run all three simultaneously on different ports!
+```
+
+### Step 2: Install Modelium
+
+```bash
+# Clone
 git clone https://github.com/sp1derz/modelium.git
 cd modelium
 
-# Build Docker image (10-15 min, one-time)
-docker build -t modelium:latest .
+# Install
+python3 -m venv venv
+source venv/bin/activate
+pip install -e ".[all]"
 
-# Update docker-compose.yml to use local image
-sed -i 's|ghcr.io/sp1derz/modelium:latest|modelium:latest|' docker-compose.yml
-
-# Start with Docker Compose
-docker-compose up -d
-
-# Check status
-curl http://localhost:8000/health
+# Check setup
+python -m modelium.cli check
 ```
 
-See [DOCKER.md](DOCKER.md) for GPU setup.
-
-### Option 2: Kubernetes (Production)
-
-⚠️ **First**: Build & push image to registry - see [DOCKER_BUILD_PUSH.md](DOCKER_BUILD_PUSH.md)
+### Step 3: Configure Runtime Endpoints
 
 ```bash
-# Build and push to GitHub Container Registry
-docker build -t ghcr.io/sp1derz/modelium:latest .
-echo YOUR_TOKEN | docker login ghcr.io -u sp1derz --password-stdin
-docker push ghcr.io/sp1derz/modelium:latest
+# Initialize config
+python -m modelium.cli init
 
-# Then deploy with kubectl
+# Edit modelium.yaml to match your runtime endpoints
+# Default ports: vLLM=8001, Ray=8002, Triton=8003
+```
+
+Example `modelium.yaml`:
+
+```yaml
+vllm:
+  enabled: true
+  endpoint: "http://localhost:8001"  # Where vLLM is running
+
+triton:
+  enabled: false  # Set to true if you're running Triton
+  endpoint: "http://localhost:8003"
+
+ray_serve:
+  enabled: false  # Set to true if you're running Ray Serve
+  endpoint: "http://localhost:8002"
+```
+
+### Step 4: Start Modelium
+
+```bash
+python -m modelium.cli serve
+```
+
+You'll see:
+
+```
+🧠 Starting Modelium Server...
+📝 Loading configuration...
+🔧 Connecting to runtimes...
+   ✅ vLLM connected
+🚀 Server starting...
+   API: http://0.0.0.0:8000
+```
+
+### Step 5: Drop a Model & Test
+
+```bash
+# Create directory for incoming models
+mkdir -p models/incoming
+
+# Download a HuggingFace model (or symlink your local models)
+cd models/incoming
+git clone https://huggingface.co/gpt2 gpt2-model
+cd ../..
+
+# Modelium will auto-detect it! Watch the logs:
+# 📋 Analyzing gpt2-model...
+#    Detected: GPT2LMHeadModel
+#    Runtime: vllm
+
+# Test inference
+curl -X POST http://localhost:8000/predict/gpt2-model \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Hello, world! This is",
+    "organizationId": "my-org",
+    "max_tokens": 50,
+    "temperature": 0.7
+  }' | jq
+```
+
+## 📖 Documentation
+
+- **[Getting Started](docs/getting-started.md)** - Complete installation guide
+- **[Architecture](docs/architecture.md)** - System design and components
+- **[Usage](docs/usage.md)** - API reference and advanced features
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Kubernetes, Helm, cloud deployment
+- **[DOCKER.md](DOCKER.md)** - Docker setup and GPU configuration
+
+## 💡 Examples
+
+See `examples/` directory:
+
+- **`vllm_deployment.py`** - Deploy LLMs with vLLM
+- **`triton_deployment.py`** - Deploy with Triton
+- **`ray_deployment.py`** - Deploy with Ray Serve
+- **`multi_runtime.py`** - Use multiple runtimes together
+
+## 🎯 Use Cases
+
+### 1. **Simplified LLM Serving**
+Run vLLM once with your model, let Modelium handle discovery and routing:
+
+```bash
+# Start vLLM with your model
+docker run --gpus all -p 8001:8000 vllm/vllm-openai:latest \
+  --model meta-llama/Llama-2-7b-hf
+
+# Drop more models in /models/incoming, Modelium detects them
+# All accessible via single API: http://localhost:8000/predict/{model}
+```
+
+### 2. **Multi-Model Serving**
+Run multiple models across different runtimes:
+
+```yaml
+# Modelium automatically routes:
+# - GPT models → vLLM
+# - Vision models → Ray Serve  
+# - Optimized models → Triton
+```
+
+### 3. **Enterprise Deployment**
+Multi-tenant with usage tracking:
+
+```bash
+curl -X POST http://localhost:8000/predict/gpt2 \
+  -d '{"organizationId": "acme-corp", "prompt": "..."}'
+
+# Automatic usage tracking per organization
+# Rate limiting, billing metrics built-in
+```
+
+## 🔧 Configuration
+
+Modelium uses `modelium.yaml` for all configuration:
+
+```yaml
+# Runtime endpoints (required)
+vllm:
+  enabled: true
+  endpoint: "http://localhost:8001"
+  
+triton:
+  enabled: false
+  endpoint: "http://localhost:8003"
+
+ray_serve:
+  enabled: false
+  endpoint: "http://localhost:8002"
+
+# Model discovery
+orchestration:
+  model_discovery:
+    watch_directories: ["/models/incoming"]
+    scan_interval_seconds: 5
+
+# AI Brain (optional - for advanced orchestration)
+modelium_brain:
+  enabled: true
+  model_name: "modelium/brain-v1"  # HuggingFace model
+  fallback_to_rules: true  # Use rules if brain unavailable
+
+# Multi-tenancy
+organization:
+  id: "my-company"
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 1000
+```
+
+## 🧠 The Modelium Brain (Optional)
+
+The Modelium Brain is a fine-tuned Qwen-2.5-1.5B model that makes intelligent decisions:
+
+- **Runtime Selection**: Chooses the best runtime for each model
+- **GPU Allocation**: Optimizes which GPUs to use
+- **Load/Unload Decisions**: Dynamic model swapping for max utilization
+
+**Training your own brain:**
+
+```bash
+cd modelium/modelium_llm/training
+python train.py --dataset your_dataset.json --output modelium-brain-custom
+```
+
+See [Modelium Brain on HuggingFace](https://huggingface.co/modelium) (coming soon).
+
+## 🐳 Docker & Kubernetes
+
+### Docker Compose (Local Development)
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Modelium + vLLM + Prometheus + Grafana
+```
+
+### Kubernetes (Production)
+
+```bash
+# Using Kustomize
 kubectl apply -k infra/k8s/
 
-# Or with Helm
-helm install modelium ./infra/helm/modelium -n modelium --create-namespace
+# Using Helm
+helm install modelium ./infra/helm/modelium \
+  --set image.tag=latest \
+  --set vllm.endpoint=http://vllm-service:8000
 ```
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for complete guide.
 
-### Option 3: Python CLI (Development)
+## 📊 What Works Now
 
-```bash
-# Clone the repository
-git clone https://github.com/sp1derz/modelium.git
-cd modelium
+✅ **Core Features:**
+- HuggingFace model analysis (`config.json` parsing)
+- Runtime connectors (vLLM, Triton, Ray Serve via HTTP)
+- Auto-discovery and model watching
+- Request routing to correct runtime
+- Health checks and startup validation
+- Multi-tenant tracking (`organizationId`)
 
-# Create virtual environment
-python3.11 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+✅ **Deployment:**
+- Docker (single container)
+- Docker Compose (with GPU support)
+- Kubernetes manifests
+- Helm charts
+- CI/CD (GitHub Actions)
 
-# Install core dependencies
-pip install -e ".[all]"
+## 🚧 Coming Soon
 
-# Install vLLM separately (for LLM serving)
-pip install vllm
-```
-
-### Check Your Setup
-
-```bash
-# Verify all dependencies are installed
-python -m modelium.cli check --verbose
-
-# Should show:
-# ✅ Python 3.11+
-# ✅ PyTorch with CUDA
-# ✅ All dependencies installed
-# ✅ GPUs detected
-```
-
-### First Run
-
-```bash
-# 1. Initialize configuration
-python -m modelium.cli init
-
-# 2. Create watch directory
-mkdir -p /models/incoming
-
-# 3. Start the server
-python -m modelium.cli serve --config modelium.yaml
-
-# Server will start with:
-# - Model watcher (auto-discovers models)
-# - Brain orchestrator (intelligent GPU management)
-# - API server (http://localhost:8000)
-```
-
-### Drop Models & Serve
-
-```bash
-# Just copy a model to the watched directory
-cp your_model.pt /models/incoming/
-
-# Modelium automatically:
-# 1. Discovers the model
-# 2. Analyzes it (framework, type, size)
-# 3. Brain decides optimal runtime & GPU
-# 4. Loads with vLLM/Ray Serve
-# 5. Exposes API endpoint
-```
-
-### Make Requests
-
-```bash
-# Check status
-curl http://localhost:8000/status
-
-# List models
-curl http://localhost:8000/models
-
-# Run inference
-curl -X POST http://localhost:8000/predict/your_model \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "Hello, world!",
-    "organizationId": "your-org",
-    "max_tokens": 100
-  }'
-```
-
-## 🧠 How It Works
-
-### Continuous Workflow
-
-```
-1. User drops model.pt → /models/incoming/
-2. Watcher discovers it (scans every 30s)
-3. Analyzer extracts metadata (framework, size, type)
-4. Brain decides: "Use vLLM on GPU 2" (LLM detected)
-5. vLLM loads model (30-60s with GPUDirect Storage)
-6. API endpoint created: /predict/model-name
-7. Orchestrator runs every 10s:
-   - Brain evaluates all models
-   - High traffic models stay loaded
-   - Idle models (>5min) get evicted
-   - Pending requests trigger loading
-```
-
-### Intelligent Orchestration
-
-The **Modelium Brain** (fine-tuned Qwen-2.5-1.8B) makes decisions:
-
-**Task 1: Deployment Planning**
-- Detects model type (LLM, vision, text)
-- Chooses runtime (vLLM for LLMs, Ray for general)
-- Selects optimal GPU based on memory
-- Confidence score: 85-95%
-
-**Task 2: Resource Optimization (Every 10s)**
-- Monitors: QPS, latency, idle time, GPU memory
-- Actions: Keep, Evict, Load
-- Goal: Maximize utilization, minimize latency
-- Learns from patterns over time
-
-## 📊 Example Scenario
-
-**Setup**: 4 GPUs, 10 models, varying traffic patterns
-
-**Without Modelium**: 20% GPU utilization, manual configuration  
-**With Modelium**: 70% GPU utilization, zero manual work
-
-The AI brain:
-- Keeps high-traffic models loaded (qwen-7b: 50 QPS)
-- Evicts idle models (bert: 0 QPS for 10 minutes)
-- Loads models on-demand (mistral-7b: 3 pending requests)
-- Optimizes GPU packing (small models share GPUs)
-
-## 📚 Documentation
-
-**Getting Started**:
-- [Getting Started](docs/getting-started.md) - Installation and first steps
-- [Docker Guide](DOCKER.md) - Docker and Docker Compose
-- [Deployment Guide](DEPLOYMENT.md) - K8s, Helm, Cloud providers
-
-**Architecture**:
-- [Architecture](docs/architecture.md) - System design and components
-- [The Brain](docs/brain.md) - How AI orchestration works
-
-**Usage**:
-- [Usage Guide](docs/usage.md) - CLI commands and API
-- [Testing Guide](TESTING_TOMORROW.md) - Step-by-step testing
-- [Status](STATUS.md) - Implementation status and roadmap
-
-## 🔧 Configuration
-
-Edit `modelium.yaml`:
-
-```yaml
-# Core configuration
-organization:
-  id: "my-company"
-
-# AI Brain (downloads from HuggingFace)
-modelium_brain:
-  enabled: true
-  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
-  device: "cuda:0"
-  fallback_to_rules: true  # Use rules if LLM fails
-
-# Auto-discovery and orchestration
-orchestration:
-  enabled: true
-  mode: "intelligent"  # Uses brain for decisions
-  model_discovery:
-    watch_directories: ["/models/incoming"]
-    scan_interval_seconds: 30
-  decision_interval_seconds: 10  # Brain checks every 10s
-  policies:
-    evict_after_idle_seconds: 300  # Evict after 5min idle
-    always_loaded: []  # Models that never get evicted
-
-# GPU configuration
-gpu:
-  enabled: true
-  count: 4  # Or null for auto-detect
-
-# Runtime preferences
-vllm:
-  enabled: true
-  gpu_memory_utilization: 0.9
-  port: 8000
-
-ray_serve:
-  enabled: true
-  num_gpus_per_replica: 1.0
-  port: 8001
-```
-
-See [configuration examples](configs/) for advanced setups.
-
-## 🎯 Use Cases
-
-- **AI Startups**: Maximize GPU ROI, serve multiple models efficiently
-- **ML Teams**: Zero-config model deployment, focus on models not ops
-- **Research Labs**: Dynamic resource allocation, experiment freely
-- **Enterprises**: Multi-tenant serving, usage tracking, cost optimization
-
-## 🏗️ Deployment Options
-
-| Method | Time | Use Case | Guide |
-|--------|------|----------|-------|
-| **Docker Compose** | 5 min | Local/Testing | [DOCKER.md](DOCKER.md) |
-| **Kubernetes** | 10 min | Production | [DEPLOYMENT.md](DEPLOYMENT.md) |
-| **Helm Chart** | 5 min | Enterprise | [DEPLOYMENT.md](DEPLOYMENT.md) |
-| **Python CLI** | 2 min | Development | [Getting Started](docs/getting-started.md) |
-
-**Cloud Support**: AWS (EKS), GCP (GKE), Azure (AKS), on-prem Kubernetes
-
-> **Note**: Automatic CD (Docker builds) disabled due to GitHub Actions disk limits. 
-> Build locally or on cloud VMs. See [CD_DISABLED.md](CD_DISABLED.md) for details.
+- **Modelium Brain Training**: Fine-tuned model on HuggingFace
+- **GPUDirect Storage**: Ultra-fast model loading
+- **Advanced Orchestration**: Dynamic load/unload based on demand
+- **Prometheus Metrics**: Detailed monitoring
+- **More Runtimes**: TensorRT, OpenVINO, ONNX Runtime
+- **Web UI**: Dashboard for monitoring and management
 
 ## 🤝 Contributing
 
-We welcome contributions! Areas of interest:
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-- Fine-tuning the brain on more diverse workloads
-- Adding support for new runtimes
-- Improving fast loading strategies
-- Documentation and examples
+**Priority areas:**
+- Testing on different GPUs (A100, H100, L40S, etc.)
+- Runtime-specific optimizations
+- Model format support (GGUF, AWQ, GPTQ)
+- Documentation improvements
 
 ## 📝 License
 
-Apache-2.0 License - see [LICENSE](LICENSE) for details.
+Apache License 2.0 - See [LICENSE](LICENSE) for details.
 
-## 🙏 Acknowledgments
+## 🙋 FAQ
 
-Built with:
-- [vLLM](https://github.com/vllm-project/vllm) - Fast LLM inference
-- [Ray Serve](https://docs.ray.io/en/latest/serve/) - Scalable model serving
-- [TensorRT](https://developer.nvidia.com/tensorrt) - High-performance inference
-- [Qwen](https://github.com/QwenLM/Qwen) - Base model for the brain
+**Q: Do I need to use the AI Brain?**  
+A: No! Set `modelium_brain.enabled: false` to use rule-based runtime selection.
 
----
+**Q: Can I run Modelium without Docker?**  
+A: Yes! Use the Python CLI (see Quick Start Option 3).
 
-## 📊 Current Status
+**Q: Which runtime should I use?**  
+A: 
+- **vLLM**: Best for LLMs (GPT, Llama, Mistral, etc.)
+- **Triton**: Best for production, optimized models, multi-framework
+- **Ray Serve**: Best for custom Python models, easy deployment
 
-**Version**: 0.2.0-alpha  
-**Status**: Phase 2 Complete - Model serving works!  
-**Production Ready**: 60% (see [STATUS.md](STATUS.md))
+**Q: Does Modelium replace vLLM/Triton/Ray?**  
+A: No! Modelium **connects to** them. You still run the runtimes; Modelium orchestrates and routes.
 
-**What Works Now**:
-- ✅ Model discovery & auto-deployment
-- ✅ Brain-powered orchestration  
-- ✅ vLLM & Ray Serve integration
-- ✅ Multi-GPU support
-- ✅ Real-time metrics tracking
-- ✅ FastAPI endpoints
-- ✅ Docker & Docker Compose
-- ✅ Kubernetes manifests
-- ✅ Helm chart
-- ✅ CI pipeline (code validation)
-- ⚠️ CD pipeline (manual trigger only - see [CD_DISABLED.md](CD_DISABLED.md))
+**Q: Can I use multiple runtimes simultaneously?**  
+A: Yes! Modelium will route each model to the most appropriate runtime.
 
-**Coming Soon**:
-- ⏳ Prometheus metrics export
-- ⏳ Grafana dashboards
-- ⏳ Fine-tuned brain model on HuggingFace
-- ⏳ Request queueing
-- ⏳ Multi-instance orchestration
+## 📞 Support
+
+- **Documentation**: [docs/](docs/)
+- **Issues**: [GitHub Issues](https://github.com/sp1derz/modelium/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/sp1derz/modelium/discussions)
 
 ---
 
-**Python**: 3.10+ | **License**: Apache-2.0 | **GPUs**: NVIDIA CUDA required
-
-Star ⭐ this repo if you find it useful!
+**Built with ❤️ for the ML community. Star ⭐ if you find it useful!**

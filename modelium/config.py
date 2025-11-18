@@ -34,34 +34,22 @@ class GPUConfig(BaseModel):
 
 
 class VLLMConfig(BaseModel):
-    """vLLM-specific settings."""
+    """vLLM settings - connects to external vLLM server."""
     enabled: bool = True
-    tensor_parallel_size: Optional[int] = None
-    dtype: str = "auto"
-    max_model_len: Optional[int] = None
-    gpu_memory_utilization: float = 0.9
-    quantization: Optional[str] = None
-    enable_lora: bool = False
-    max_loras: int = 1
-    trust_remote_code: bool = True
-    port: int = 8000
-    host: str = "0.0.0.0"
+    endpoint: str = "http://localhost:8001"  # vLLM server endpoint
+    health_check_path: str = "/health"
+    model_load_path: str = "/v1/models"
+    inference_path: str = "/v1/completions"
+    timeout: int = 300  # seconds
 
 
 class RayServeConfig(BaseModel):
-    """Ray Serve settings."""
+    """Ray Serve settings - connects to external Ray Serve cluster."""
     enabled: bool = True
-    num_cpus_per_replica: float = 2.0
-    num_gpus_per_replica: float = 1.0
-    max_concurrent_queries: int = 100
-    autoscaling: Dict[str, Any] = Field(default_factory=lambda: {
-        "enabled": True,
-        "min_replicas": 1,
-        "max_replicas": 10,
-        "target_num_ongoing_requests_per_replica": 5
-    })
-    port: int = 8001
-    host: str = "0.0.0.0"
+    endpoint: str = "http://localhost:8002"  # Ray Serve endpoint
+    health_check_path: str = "/-/healthz"
+    inference_path: str = "/predict"
+    timeout: int = 300  # seconds
 
 
 class TensorRTConfig(BaseModel):
@@ -75,19 +63,13 @@ class TensorRTConfig(BaseModel):
 
 
 class TritonConfig(BaseModel):
-    """Triton Inference Server settings."""
+    """Triton Inference Server settings - connects to external Triton server."""
     enabled: bool = True
-    port: int = 8002
-    grpc_port: int = 8003
-    http_port: int = 8002
-    metrics_port: int = 8004
-    model_repository: str = "/models"
-    strict_model_config: bool = False
-    dynamic_batching: Dict[str, Any] = Field(default_factory=lambda: {
-        "enabled": True,
-        "max_queue_delay_microseconds": 100,
-        "preferred_batch_sizes": [1, 2, 4, 8, 16, 32]
-    })
+    endpoint: str = "http://localhost:8003"  # Triton server endpoint
+    health_check_path: str = "/v2/health/ready"
+    model_repository_path: str = "/v2/repository/models"
+    inference_path: str = "/v2/models/{model}/infer"  # KServe v2 protocol
+    timeout: int = 300  # seconds
 
 
 class ConversionConfig(BaseModel):
