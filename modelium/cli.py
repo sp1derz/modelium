@@ -96,6 +96,45 @@ def serve(
             console.print("  ray_serve.enabled: true")
             raise typer.Exit(1)
         
+        # Check if enabled runtimes are actually installed/available
+        console.print("🔍 Checking runtimes...")
+        runtimes_ok = False
+        
+        if cfg.vllm.enabled:
+            try:
+                import vllm
+                console.print("   ✅ vLLM installed")
+                runtimes_ok = True
+            except ImportError:
+                console.print("   [yellow]⚠️  vLLM enabled but not installed[/yellow]")
+                console.print("      Install: pip install vllm")
+                console.print("      Or disable in modelium.yaml")
+        
+        if cfg.triton.enabled:
+            # Triton is external - just warn user to start it
+            console.print("   [yellow]⚠️  Triton enabled[/yellow]")
+            console.print("      Make sure Triton server is running:")
+            console.print("      docker run --gpus all -p 8003:8000 nvcr.io/nvidia/tritonserver:latest")
+            runtimes_ok = True  # Don't block startup
+        
+        if cfg.ray_serve.enabled:
+            try:
+                import ray
+                console.print("   ✅ Ray installed")
+                runtimes_ok = True
+            except ImportError:
+                console.print("   [yellow]⚠️  Ray enabled but not installed[/yellow]")
+                console.print("      Install: pip install ray[serve]")
+                console.print("      Or disable in modelium.yaml")
+        
+        if not runtimes_ok:
+            console.print("\n[red]❌ No runtimes are available![/red]")
+            console.print("\nInstall at least one runtime:")
+            console.print("  pip install vllm")
+            console.print("  pip install ray[serve]")
+            console.print("  # OR start Triton server")
+            raise typer.Exit(1)
+        
         # Initialize components
         registry = ModelRegistry()
         metrics = ModeliumMetrics()

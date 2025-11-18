@@ -147,6 +147,14 @@ class RuntimeManager:
     ) -> bool:
         """Load model by spawning vLLM process."""
         try:
+            # Check if vLLM is installed
+            try:
+                import vllm
+            except ImportError:
+                self.logger.error(f"   ❌ vLLM not installed!")
+                self.logger.error(f"   Install: pip install vllm")
+                return False
+            
             # Allocate port
             port = self._vllm_next_port
             self._vllm_next_port += 1
