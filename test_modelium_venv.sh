@@ -54,7 +54,10 @@ test_success "Virtual environment activated"
 # ============================================
 test_step "STEP 2: Installing Modelium"
 
+echo "Running: pip install --upgrade pip"
 pip install -q --upgrade pip
+
+echo "Running: pip install -e \".[all]\""
 pip install -q -e ".[all]"
 test_success "Modelium installed"
 
@@ -66,13 +69,20 @@ test_step "STEP 3: Checking vLLM installation"
 # Check if on Linux (vLLM requires Linux+CUDA)
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo "Linux detected - installing vLLM..."
+    echo "Running: pip install vllm"
     pip install -q vllm || {
         test_fail "vLLM installation failed (may need CUDA)"
         echo "Falling back to Ray for testing..."
+        echo "Running: pip install ray[serve]"
         pip install -q ray[serve]
     }
+    if pip show vllm &>/dev/null; then
+        echo "✅ vLLM version: $(pip show vllm | grep Version | cut -d' ' -f2)"
+        test_success "vLLM installed"
+    fi
 else
     echo "Non-Linux OS detected - using Ray instead of vLLM"
+    echo "Running: pip install ray[serve]"
     pip install -q ray[serve]
     test_success "Ray installed (vLLM requires Linux+CUDA)"
 fi
@@ -324,12 +334,29 @@ echo ""
 echo "🔍 Checking Modelium server logs for watcher status..."
 if [ -f "modelium_test.log" ]; then
     echo "Watcher-related log entries:"
-    grep -i "watch\|discover\|scan" modelium_test.log | tail -10 || echo "  (none found)"
+    grep -i "watch\|discover\|scan\|orchestrator\|on_model_discovered" modelium_test.log | tail -20 || echo "  (none found)"
+    echo ""
+    echo "Model loading attempts:"
+    grep -i "loading\|load_model\|runtime\|brain decision" modelium_test.log | tail -20 || echo "  (none found)"
+    echo ""
+    echo "Recent errors:"
+    grep -i "error\|failed\|exception" modelium_test.log | tail -10 || echo "  (none found)"
 fi
 
 echo ""
 echo "📊 Current model registry status:"
-curl -s http://localhost:8000/models | jq '.' 2>/dev/null || curl -s http://localhost:8000/models
+echo "Running: curl -s http://localhost:8000/models"
+MODELS_JSON=$(curl -s http://localhost:8000/models)
+echo "$MODELS_JSON" | jq '.' 2>/dev/null || echo "$MODELS_JSON"
+
+# Check if runtime is null
+RUNTIME_NULL=$(echo "$MODELS_JSON" | jq -r '.models[]?.runtime' 2>/dev/null | grep -c "null" || echo "0")
+if [ "$RUNTIME_NULL" -gt 0 ]; then
+    echo ""
+    echo "⚠️  WARNING: Model has runtime=null"
+    echo "   This means the orchestrator hasn't assigned a runtime yet."
+    echo "   Checking if orchestrator callback is being called..."
+fi
 
 echo ""
 echo "🔧 Attempting automatic fix..."
@@ -464,24 +491,41 @@ done
 test_step "STEP 12: Waiting for model to load (may take 30-120s)"
 
 # Get first model name if any detected
+echo "Running: curl -s http://localhost:8000/models | jq -r '.models[0].name'"
 FIRST_MODEL=$(curl -s http://localhost:8000/models | jq -r '.models[0].name' 2>/dev/null || echo "")
 if [ -z "$FIRST_MODEL" ] || [ "$FIRST_MODEL" = "null" ]; then
     FIRST_MODEL="gpt2"  # Fallback to gpt2 for testing
 fi
 
 echo "Waiting for model: $FIRST_MODEL"
+echo ""
+echo "🔍 Debugging model loading..."
+echo "Checking logs for orchestrator activity:"
+if [ -f "modelium_test.log" ]; then
+    echo "  - Orchestrator on_model_discovered calls:"
+    grep -i "on_model_discovered\|New model discovered" modelium_test.log | tail -5 || echo "    (none found)"
+    echo "  - Runtime decisions:"
+    grep -i "brain decision\|choose_runtime\|runtime:" modelium_test.log | tail -5 || echo "    (none found)"
+    echo "  - Load attempts:"
+    grep -i "loading model\|load_model\|spawning\|starting" modelium_test.log | tail -5 || echo "    (none found)"
+fi
+echo ""
 
 for i in {1..40}; do
+    echo "Running: curl -s http://localhost:8000/models (attempt $i/40)"
     MODELS=$(curl -s http://localhost:8000/models)
     MODEL_STATUS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .status" 2>/dev/null || echo "")
+    MODEL_RUNTIME=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .runtime" 2>/dev/null || echo "null")
     
     if [ "$MODEL_STATUS" = "loaded" ]; then
         test_success "Model loaded successfully!"
+        echo "  Runtime: $MODEL_RUNTIME"
         break
     elif [ "$MODEL_STATUS" = "error" ]; then
         test_fail "Model failed to load"
+        echo "  Runtime: $MODEL_RUNTIME"
         echo "Check logs:"
-        tail -50 modelium_test.log
+        tail -100 modelium_test.log | grep -A 5 -B 5 -i "error\|failed\|exception" || tail -50 modelium_test.log
         kill $MODELIUM_PID 2>/dev/null || true
         exit 1
     fi
@@ -489,13 +533,28 @@ for i in {1..40}; do
     if [ $i -eq 40 ]; then
         test_fail "Model loading timeout (200 seconds)"
         echo "Current status: $MODEL_STATUS"
-        echo "Logs:"
-        tail -50 modelium_test.log
+        echo "Current runtime: $MODEL_RUNTIME"
+        echo ""
+        echo "Full model info:"
+        echo "$MODELS" | jq ".models[] | select(.name==\"$FIRST_MODEL\")" 2>/dev/null || echo "$MODELS"
+        echo ""
+        echo "Recent logs (last 100 lines):"
+        tail -100 modelium_test.log
+        echo ""
+        echo "Orchestrator activity:"
+        grep -i "orchestrator\|on_model_discovered\|brain decision\|loading model" modelium_test.log | tail -20 || echo "  (none found)"
         kill $MODELIUM_PID 2>/dev/null || true
         exit 1
     fi
     
-    echo "  Status: $MODEL_STATUS (attempt $i/40)"
+    echo "  Status: $MODEL_STATUS, Runtime: $MODEL_RUNTIME (attempt $i/40)"
+    if [ "$MODEL_RUNTIME" = "null" ] && [ $i -gt 5 ]; then
+        echo "  ⚠️  Runtime still null after $((i*5)) seconds - orchestrator may not be working"
+        echo "  Checking if orchestrator callback is registered..."
+        if [ -f "modelium_test.log" ]; then
+            grep -i "orchestrator\|on_model_discovered" modelium_test.log | tail -3 || echo "    (no orchestrator activity found)"
+        fi
+    fi
     sleep 5
 done
 
