@@ -525,9 +525,6 @@ class RuntimeManager:
         if stderr_path:
             self.logger.error(f"   📋 Check logs: {stderr_path}")
         return False
-        
-        self.logger.error(f"   Timeout after {timeout}s")
-        return False
     
     # ==================== Triton ====================
     
