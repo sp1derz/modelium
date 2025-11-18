@@ -761,7 +761,12 @@ max_batch_size: 32
                 
                 if endpoint is None:
                     self.logger.error(f"   ❌ No endpoint found in model info!")
-                    self.logger.error(f"   Model info keys: {list(info.keys()) if isinstance(info, dict) else 'not a dict'}")
+                    if isinstance(info, dict):
+                        import builtins
+                        info_keys = builtins.list(info.keys())
+                        self.logger.error(f"   Model info keys: {info_keys}")
+                    else:
+                        self.logger.error(f"   Model info is not a dict: {type(info)}")
                     self.logger.error(f"   Full model info: {info}")
                     return {"error": "No endpoint configured for vLLM model"}
                 

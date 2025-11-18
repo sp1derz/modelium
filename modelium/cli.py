@@ -293,8 +293,9 @@ def serve(
                 logger.debug(f"   Inference result type: {type(result)}")
                 logger.debug(f"   Inference result: {result}")
                 if isinstance(result, dict):
-                    # Safe way to get keys - convert to list explicitly
-                    result_keys = [str(k) for k in result.keys()]
+                    # Safe way to get keys - use built-in list (not the CLI list function!)
+                    import builtins
+                    result_keys = builtins.list(result.keys())
                     logger.debug(f"   Inference result keys: {result_keys}")
                 else:
                     logger.warning(f"   ⚠️  Result is not a dict: {type(result)}, value: {result}")
