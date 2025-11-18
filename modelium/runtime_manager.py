@@ -606,15 +606,31 @@ max_batch_size: 32
         try:
             if runtime == "vllm":
                 # vLLM uses OpenAI-compatible API
-                # Try Chat Completions first (preferred in vLLM 0.10+)
                 endpoint = info['endpoint']
                 
-                # Try /v1/chat/completions first (works for most models in vLLM 0.10+)
+                # Get actual model name from vLLM (might be different from our model_name)
+                # vLLM might use the model path or a derived name
+                actual_model_name = info.get("vllm_model_name", model_name)
+                
+                # Try to get model list from vLLM to find the correct model identifier
+                try:
+                    models_resp = requests.get(f"{endpoint}/v1/models", timeout=5)
+                    if models_resp.status_code == 200:
+                        models_data = models_resp.json()
+                        if "data" in models_data and len(models_data["data"]) > 0:
+                            # Use the first available model's id
+                            actual_model_name = models_data["data"][0].get("id", model_name)
+                            self.logger.debug(f"Using vLLM model name: {actual_model_name}")
+                except:
+                    # If we can't query models, use stored name or fallback
+                    pass
+                
+                # Try /v1/chat/completions first (preferred in vLLM 0.10+)
                 try:
                     resp = requests.post(
                         f"{endpoint}/v1/chat/completions",
                         json={
-                            "model": model_name,
+                            "model": actual_model_name,
                             "messages": [
                                 {"role": "user", "content": prompt}
                             ],
@@ -635,13 +651,15 @@ max_batch_size: 32
                             }
                     elif resp.status_code == 400:
                         # If chat completions not supported, try legacy completions
-                        self.logger.debug(f"Chat completions not supported, trying legacy completions API")
+                        error_msg = resp.text
+                        self.logger.debug(f"Chat completions not supported: {error_msg}")
                     else:
                         resp.raise_for_status()
                 except requests.exceptions.HTTPError as e:
-                    if "does not support" in str(e) or "400" in str(e):
+                    error_msg = str(e)
+                    if "does not support" in error_msg or "400" in error_msg:
                         # Fall back to legacy completions API
-                        self.logger.debug(f"Chat completions failed, trying legacy completions: {e}")
+                        self.logger.debug(f"Chat completions failed, trying legacy completions: {error_msg}")
                     else:
                         raise
                 
@@ -649,7 +667,7 @@ max_batch_size: 32
                 resp = requests.post(
                     f"{endpoint}/v1/completions",
                     json={
-                        "model": model_name,
+                        "model": actual_model_name,
                         "prompt": prompt,
                         "max_tokens": max_tokens,
                         "temperature": kwargs.get("temperature", 0.7),
