@@ -368,8 +368,22 @@ class RuntimeManager:
                         if models_resp.status_code == 200:
                             models_data = models_resp.json()
                             if "data" in models_data and len(models_data["data"]) > 0:
-                                vllm_model_name = models_data["data"][0].get("id", model_name)
-                                self.logger.info(f"   vLLM model identifier: {vllm_model_name}")
+                                model_info = models_data["data"][0]
+                                vllm_model_name = model_info.get("id", model_name)
+                                
+                                # For GPT-2 and similar models, vLLM might use the path
+                                # Try to extract just the model name if it's a path
+                                if "/" in vllm_model_name:
+                                    # If it's a path, try using just the last component
+                                    # But also store the full path as fallback
+                                    path_components = vllm_model_name.split("/")
+                                    simple_name = path_components[-1] if path_components else model_name
+                                    self.logger.info(f"   vLLM model identifier: {vllm_model_name}")
+                                    self.logger.info(f"   Will try both: '{vllm_model_name}' and '{simple_name}'")
+                                    # Store both for inference to try
+                                    vllm_model_name = vllm_model_name  # Keep full path as primary
+                                else:
+                                    self.logger.info(f"   vLLM model identifier: {vllm_model_name}")
                     except Exception as e:
                         # If we can't query, use model path component as fallback
                         # vLLM often uses the model path or last component
@@ -754,6 +768,15 @@ max_batch_size: 32
                             self.logger.info(f"   ✅ Using vLLM model identifier: {actual_model_name}")
                             self.logger.info(f"   📋 Model info: owned_by={owned_by}, id={actual_model_name}")
                             
+                            # For GPT-2, if model name is a path, also try just the model name
+                            # vLLM might accept either format
+                            if "/" in actual_model_name and "gpt2" in actual_model_name.lower():
+                                # Extract just "gpt2" from path
+                                path_parts = actual_model_name.split("/")
+                                simple_name = [p for p in path_parts if "gpt2" in p.lower()][-1] if path_parts else None
+                                if simple_name:
+                                    self.logger.info(f"   💡 GPT-2 detected, will also try simple name: '{simple_name}'")
+                            
                             # Log full model info for debugging
                             self.logger.debug(f"   Full model info: {model_info}")
                         else:
@@ -792,62 +815,66 @@ max_batch_size: 32
                                 "choices": result.get("choices", []),
                                 "usage": result.get("usage", {})
                             }
-                    else:
-                        # Read error message
-                        try:
-                            error_data = resp.json()
-                            error_msg = error_data.get("error", {}).get("message", resp.text)
-                        except:
-                            error_msg = resp.text
-                        
-                        self.logger.debug(f"   Chat Completions returned {resp.status_code}: {error_msg}")
-                        
-                        if resp.status_code == 400 and "does not support" in error_msg.lower():
-                            # Model doesn't support chat completions, try legacy
-                            self.logger.debug(f"   Model doesn't support Chat Completions, trying legacy Completions API")
-                        else:
-                            resp.raise_for_status()
-                except requests.exceptions.HTTPError as e:
-                    error_msg = str(e)
-                    self.logger.debug(f"   Chat Completions HTTP error: {error_msg}")
-                    if "does not support" in error_msg.lower() or "400" in error_msg:
-                        # Fall back to legacy completions API
-                        self.logger.debug(f"   Will try legacy Completions API")
-                    else:
-                        raise
-                except Exception as e:
-                    self.logger.debug(f"   Chat Completions exception: {e}")
-                    if not chat_completions_tried:
-                        raise
                 
                 # Fallback to legacy /v1/completions API
-                self.logger.debug(f"   Trying legacy Completions API with model: {actual_model_name}")
-                try:
-                    resp = requests.post(
-                        f"{endpoint}/v1/completions",
-                        json={
-                            "model": actual_model_name,
-                            "prompt": prompt,
-                            "max_tokens": max_tokens,
-                            "temperature": kwargs.get("temperature", 0.7),
-                            **{k: v for k, v in kwargs.items() if k != "temperature"}
-                        },
-                        timeout=30
-                    )
-                    
-                    if resp.status_code == 200:
-                        self.logger.debug(f"   ✅ Legacy Completions API succeeded")
-                        return resp.json()
-                    else:
-                        # Read error message
-                        try:
-                            error_data = resp.json()
-                            error_msg = error_data.get("error", {}).get("message", resp.text)
-                        except:
-                            error_msg = resp.text
+                # Try all model name variants
+                completions_success = False
+                for model_name_variant in model_names_to_try:
+                    try:
+                        self.logger.debug(f"   Trying legacy Completions API with model: {model_name_variant}")
+                        resp = requests.post(
+                            f"{endpoint}/v1/completions",
+                            json={
+                                "model": model_name_variant,
+                                "prompt": prompt,
+                                "max_tokens": max_tokens,
+                                "temperature": kwargs.get("temperature", 0.7),
+                                **{k: v for k, v in kwargs.items() if k != "temperature"}
+                            },
+                            timeout=30
+                        )
                         
-                        self.logger.error(f"   ❌ Completions API failed: {error_msg}")
-                        resp.raise_for_status()
+                        if resp.status_code == 200:
+                            self.logger.debug(f"   ✅ Legacy Completions API succeeded with model: {model_name_variant}")
+                            return resp.json()
+                        else:
+                            # Read error message
+                            try:
+                                error_data = resp.json()
+                                error_msg = error_data.get("error", {}).get("message", resp.text)
+                            except:
+                                error_msg = resp.text
+                            
+                            self.logger.debug(f"   Completions API with '{model_name_variant}' returned {resp.status_code}: {error_msg}")
+                            
+                            # If this model name doesn't work, try next variant
+                            if resp.status_code == 400 and "does not support" not in error_msg.lower():
+                                continue  # Try next model name variant
+                            elif resp.status_code == 400 and "does not support" in error_msg.lower():
+                                # Model doesn't support completions at all
+                                self.logger.error(f"   ❌ Model '{model_name_variant}' does not support Completions API")
+                                break
+                    except requests.exceptions.HTTPError as e:
+                        # Try to get better error message
+                        try:
+                            error_data = e.response.json()
+                            error_msg = error_data.get("error", {}).get("message", str(e))
+                        except:
+                            error_msg = str(e)
+                        
+                        self.logger.debug(f"   Completions HTTP error with '{model_name_variant}': {error_msg}")
+                        if "does not support" not in error_msg.lower():
+                            continue  # Try next model name variant
+                        # If we get here, all variants failed
+                        if model_name_variant == model_names_to_try[-1]:
+                            # Last variant, raise the error
+                            raise
+                    except Exception as e:
+                        self.logger.debug(f"   Completions exception with '{model_name_variant}': {e}")
+                        if model_name_variant == model_names_to_try[-1]:
+                            # Last variant, re-raise
+                            raise
+                        continue  # Try next variant
                 except requests.exceptions.HTTPError as e:
                     # Try to get better error message
                     try:
