@@ -756,7 +756,18 @@ max_batch_size: 32
             
             if runtime == "vllm":
                 # vLLM uses OpenAI-compatible API
-                endpoint = info['endpoint']
+                endpoint = info.get('endpoint')
+                self.logger.debug(f"   Endpoint from info: {endpoint} (type: {type(endpoint)})")
+                
+                if endpoint is None:
+                    self.logger.error(f"   ❌ No endpoint found in model info!")
+                    self.logger.error(f"   Model info keys: {list(info.keys()) if isinstance(info, dict) else 'not a dict'}")
+                    self.logger.error(f"   Full model info: {info}")
+                    return {"error": "No endpoint configured for vLLM model"}
+                
+                if not isinstance(endpoint, str):
+                    self.logger.error(f"   ❌ Endpoint is not a string: {endpoint} (type: {type(endpoint)})")
+                    return {"error": f"Invalid endpoint type: {type(endpoint)}"}
                 
                 # Get actual model name from vLLM (might be different from our model_name)
                 # vLLM might use the model path or a derived name
