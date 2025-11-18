@@ -677,10 +677,44 @@ max_batch_size: 32
             if not ray.is_initialized():
                 ray.init(ignore_reinit_error=True)
             
+            # Check if Ray Serve is already running and clean up if needed
             try:
-                serve.start(detached=True)
+                # Try to get existing deployments
+                existing_deployments = serve.list_deployments()
+                if model_name in existing_deployments:
+                    self.logger.info(f"   🧹 Cleaning up existing deployment: {model_name}")
+                    serve.delete(model_name)
+                    time.sleep(2)  # Give it time to clean up
             except:
                 pass
+            
+            # Start Ray Serve (or connect if already running)
+            try:
+                # Check if serve is already running
+                try:
+                    serve.get_deployment(model_name)
+                    self.logger.warning(f"   ⚠️  Deployment {model_name} already exists, deleting...")
+                    serve.delete(model_name)
+                    time.sleep(2)
+                except:
+                    pass
+                
+                # Start serve with explicit HTTP options to avoid port conflicts
+                try:
+                    serve.start(
+                        detached=True,
+                        http_options={
+                            "host": "0.0.0.0",
+                            "port": 8002,
+                            "location": "EveryNode"
+                        }
+                    )
+                except Exception as e:
+                    # If already started, that's OK
+                    if "already running" not in str(e).lower() and "address already in use" not in str(e).lower():
+                        self.logger.warning(f"   ⚠️  Ray Serve start warning: {e}")
+            except Exception as e:
+                self.logger.warning(f"   ⚠️  Ray Serve may already be running: {e}")
             
             # Simple deployment
             @serve.deployment(
