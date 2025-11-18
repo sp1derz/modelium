@@ -893,9 +893,24 @@ max_batch_size: 32
                         self.logger.error(f"Traceback: {traceback.format_exc()}")
                         return {"error": str(e), "error_type": type(e).__name__}
             
+            # Deploy with explicit route
             deployment = GPT2Model.bind(str(model_path))
-            serve.run(deployment, name=model_name, route_prefix=f"/{model_name}")
             
+            # Use serve.deploy() instead of serve.run() for better control
+            # Ray Serve 2.x+ uses serve.deploy() with route_prefix
+            try:
+                serve.deploy(
+                    deployment,
+                    name=model_name,
+                    route_prefix=f"/{model_name}",
+                )
+                self.logger.info(f"   ✅ Deployed {model_name} to Ray Serve with route /{model_name}")
+            except Exception as deploy_error:
+                self.logger.warning(f"   ⚠️  serve.deploy() failed: {deploy_error}, trying serve.run()...")
+                # Fallback to serve.run() for older Ray versions
+                serve.run(deployment, name=model_name, route_prefix=f"/{model_name}")
+            
+            # Ray Serve endpoint: route_prefix is the path
             endpoint = f"http://localhost:8002/{model_name}"
             self._loaded_models[model_name] = {
                 "runtime": "ray",
@@ -1346,6 +1361,8 @@ max_batch_size: 32
                     self.logger.error(f"   ❌ No endpoint found for Ray model")
                     return {"error": "No endpoint configured for Ray model"}
                 
+                self.logger.debug(f"   🔍 Ray Serve inference: POST {endpoint}")
+                
                 try:
                     resp = requests.post(
                         endpoint,
@@ -1356,6 +1373,8 @@ max_batch_size: 32
                         },
                         timeout=60  # Longer timeout for model loading/generation
                     )
+                    
+                    self.logger.debug(f"   Ray Serve response: status={resp.status_code}")
                     
                     if resp.status_code == 200:
                         result = resp.json()
@@ -1373,6 +1392,20 @@ max_batch_size: 32
                             # Still return it, but log the issue
                         
                         return result
+                    elif resp.status_code == 404:
+                        # Try to get available routes
+                        try:
+                            routes_resp = requests.get("http://localhost:8002/-/routes", timeout=5)
+                            if routes_resp.status_code == 200:
+                                routes = routes_resp.json()
+                                self.logger.error(f"   ❌ Ray Serve 404: Path '{endpoint}' not found")
+                                self.logger.error(f"   Available routes: {routes}")
+                                return {"error": f"Ray Serve returned 404: Path '{endpoint}' not found. Available routes: {routes}"}
+                        except:
+                            pass
+                        error_text = resp.text
+                        self.logger.error(f"   ❌ Ray Serve returned 404: {error_text}")
+                        return {"error": f"Ray Serve returned 404: {error_text}"}
                     else:
                         error_text = resp.text[:500] if resp.text else "No error message"
                         self.logger.error(f"   ❌ Ray Serve returned {resp.status_code}: {error_text}")
