@@ -10,7 +10,7 @@ repository = "https://github.com/your-org/modelium"
 keywords = ["ml", "model-serving", "triton", "tensorrt", "kubernetes"]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.11"
 # Core dependencies - Latest stable versions (Nov 2025)
 pydantic = "^2.9.0"
 pyyaml = "^6.0.2"
@@ -74,17 +74,17 @@ modelium = "modelium.cli:app"
 
 [tool.black]
 line-length = 100
-target-version = ['py312']
+target-version = ['py311']
 include = '\.pyi?$'
 
 [tool.ruff]
 line-length = 100
 select = ["E", "F", "I", "N", "W"]
 ignore = ["E501"]
-target-version = "py312"
+target-version = "py311"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
