@@ -737,15 +737,55 @@ else
 fi
 
 # ============================================
-# STEP 14: Test Metrics
+# STEP 14: Test Prometheus Metrics (Detailed)
 # ============================================
-test_step "STEP 14: Testing Prometheus metrics"
+test_step "STEP 14: Testing Prometheus metrics (brain decision data)"
 
 METRICS=$(curl -s http://localhost:9090/metrics 2>/dev/null || echo "")
 if echo "$METRICS" | grep -q "modelium"; then
     test_success "Prometheus metrics working"
-    echo "Sample metrics:"
-    echo "$METRICS" | grep "modelium" | head -5
+    echo ""
+    echo "📊 All Modelium metrics (brain uses these for decisions):"
+    echo "$METRICS" | grep "modelium" | head -20
+    echo ""
+    
+    # Check for key metrics the brain uses
+    echo "🔍 Checking metrics the brain uses for decisions:"
+    
+    # QPS metrics
+    if echo "$METRICS" | grep -q "modelium_requests_total"; then
+        echo "  ✅ QPS tracking: modelium_requests_total (brain uses for traffic analysis)"
+        echo "$METRICS" | grep "modelium_requests_total" | head -3
+    else
+        echo "  ⚠️  QPS tracking not found"
+    fi
+    
+    # Latency metrics
+    if echo "$METRICS" | grep -q "modelium_request_latency"; then
+        echo "  ✅ Latency tracking: modelium_request_latency (brain uses for performance)"
+        echo "$METRICS" | grep "modelium_request_latency" | head -3
+    else
+        echo "  ⚠️  Latency tracking not found (may be added later)"
+    fi
+    
+    # Model load/unload events
+    if echo "$METRICS" | grep -q "modelium_model_loads"; then
+        echo "  ✅ Model lifecycle: modelium_model_loads (brain tracks model state)"
+        echo "$METRICS" | grep "modelium_model_loads" | head -3
+    else
+        echo "  ⚠️  Model lifecycle tracking not found"
+    fi
+    
+    # Orchestration decisions
+    if echo "$METRICS" | grep -q "modelium_orchestration_decisions"; then
+        echo "  ✅ Brain decisions: modelium_orchestration_decisions (brain's actions)"
+        echo "$METRICS" | grep "modelium_orchestration_decisions" | head -3
+    else
+        echo "  ⚠️  Orchestration decisions not found (brain may not have made decisions yet)"
+    fi
+    
+    echo ""
+    echo "💡 These metrics feed into the brain (Qwen) for intelligent decisions"
 else
     test_fail "Prometheus metrics not available"
 fi
@@ -803,25 +843,141 @@ else
 fi
 
 # ============================================
-# STEP 16: Check Orchestration
+# STEP 16: Check Brain Decision Making
 # ============================================
-test_step "STEP 16: Checking intelligent orchestration"
+test_step "STEP 16: Checking brain (Qwen) decision making"
+
+echo ""
+echo "🧠 Testing the Modelium Brain (Qwen) orchestration system..."
+echo ""
 
 # Get current model stats
 MODELS=$(curl -s http://localhost:8000/models)
 QPS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .qps" 2>/dev/null || echo "0")
+IDLE_SECONDS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .idle_seconds" 2>/dev/null || echo "0")
+STATUS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .status" 2>/dev/null || echo "unknown")
 
-echo "Current QPS: $QPS"
-if [ "$QPS" != "0" ]; then
+echo "📊 Current model state (brain uses this for decisions):"
+echo "  Model: $FIRST_MODEL"
+echo "  Status: $STATUS"
+echo "  QPS: $QPS"
+echo "  Idle seconds: $IDLE_SECONDS"
+echo ""
+
+# Check if brain is making decisions
+echo "🔍 Checking if brain is active and making decisions..."
+if [ -f "modelium_test.log" ]; then
+    # Check for brain decision logs
+    BRAIN_DECISIONS=$(grep -i "brain decision\|orchestration decision\|_check_for_idle\|make_orchestration_decision" modelium_test.log | tail -10 || echo "")
+    
+    if [ ! -z "$BRAIN_DECISIONS" ]; then
+        echo "  ✅ Brain is making decisions!"
+        echo "  Recent brain activity:"
+        echo "$BRAIN_DECISIONS" | head -5 | sed 's/^/    /'
+    else
+        echo "  ⚠️  No brain decision logs found (may be using rule-based fallback)"
+        echo "  💡 Check if brain is enabled in modelium.yaml: modelium_brain.enabled"
+    fi
+    
+    # Check for Prometheus metrics usage
+    METRICS_USAGE=$(grep -i "get_model_qps\|get_model_idle\|metrics.get" modelium_test.log | tail -5 || echo "")
+    if [ ! -z "$METRICS_USAGE" ]; then
+        echo ""
+        echo "  ✅ Brain is reading Prometheus metrics!"
+        echo "  Recent metrics queries:"
+        echo "$METRICS_USAGE" | head -3 | sed 's/^/    /'
+    else
+        echo ""
+        echo "  ⚠️  No metrics usage logs found (brain may not be querying metrics yet)"
+    fi
+fi
+
+# Check Prometheus for orchestration decisions
+METRICS=$(curl -s http://localhost:9090/metrics 2>/dev/null || echo "")
+ORCHESTRATION_DECISIONS=$(echo "$METRICS" | grep "modelium_orchestration_decisions" || echo "")
+
+if [ ! -z "$ORCHESTRATION_DECISIONS" ]; then
+    echo ""
+    echo "  ✅ Brain decisions recorded in Prometheus!"
+    echo "  Orchestration decisions:"
+    echo "$ORCHESTRATION_DECISIONS" | head -5 | sed 's/^/    /'
+    test_success "Brain is making decisions and recording them"
+else
+    echo ""
+    echo "  ⚠️  No orchestration decisions in Prometheus yet"
+    echo "  💡 Brain may not have made decisions yet (model just loaded)"
+fi
+
+# Check QPS tracking
+if [ "$QPS" != "0" ] && [ "$QPS" != "null" ]; then
+    echo ""
+    echo "  ✅ QPS tracking active: $QPS req/s (brain uses this for traffic analysis)"
     test_success "Model is tracking QPS (intelligent orchestration active)"
 else
-    echo "⚠️  QPS is 0 (may need more time to update)"
+    echo ""
+    echo "  ⚠️  QPS is 0 (may need more time to update after requests)"
+    echo "  💡 QPS is calculated from Prometheus metrics over time"
 fi
+
+echo ""
+echo "💡 The brain (Qwen) uses these metrics to decide:"
+echo "   - QPS: Keep models with high traffic"
+echo "   - Idle time: Unload models idle >5min (if GPU pressure)"
+echo "   - GPU memory: Only unload when memory is needed"
+echo "   - Policies: Respect always_loaded, priority rules"
+
+# ============================================
+# STEP 17: Test Brain Idle Model Unloading (Optional - Long Test)
+# ============================================
+test_step "STEP 17: Testing brain idle model management (waiting 30s)"
+
+echo ""
+echo "🧠 Testing if brain unloads idle models (after grace period)..."
+echo "  This tests the brain's intelligent decision-making based on Prometheus metrics"
+echo ""
+
+# Get initial state
+INITIAL_STATUS=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .status" 2>/dev/null || echo "unknown")
+echo "  Initial status: $INITIAL_STATUS"
+
+# Wait 30 seconds (model should stay loaded due to grace period of 120s)
+echo "  Waiting 30 seconds (grace period is 120s, so model should stay loaded)..."
+for i in {1..6}; do
+    sleep 5
+    CURRENT_STATUS=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .status" 2>/dev/null || echo "unknown")
+    IDLE=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .idle_seconds" 2>/dev/null || echo "0")
+    echo "    After $((i*5))s: status=$CURRENT_STATUS, idle=${IDLE}s"
+    
+    if [ "$CURRENT_STATUS" = "unloaded" ]; then
+        echo "  ⚠️  Model was unloaded (unexpected during grace period)"
+        break
+    fi
+done
+
+FINAL_STATUS=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .status" 2>/dev/null || echo "unknown")
+
+if [ "$FINAL_STATUS" = "loaded" ]; then
+    test_success "Brain correctly kept model loaded (within grace period)"
+    echo "  ✅ Brain respects grace period (120s) - model stays loaded"
+else
+    echo "  ⚠️  Model status changed: $INITIAL_STATUS → $FINAL_STATUS"
+    echo "  💡 This is expected if grace period expired or GPU pressure exists"
+fi
+
+echo ""
+echo "💡 To fully test idle unloading, wait 2+ minutes after last request"
+echo "   The brain will unload models idle >5min IF GPU memory pressure exists"
 
 # ============================================
 # CLEANUP
 # ============================================
 test_step "CLEANUP: Stopping Modelium server"
+
+echo ""
+echo "⚠️  Stopping server (this stops the brain and all orchestration)"
+echo "   To continue testing the brain, keep the server running:"
+echo "   tail -f modelium_test.log"
+echo ""
 
 kill $MODELIUM_PID 2>/dev/null || true
 sleep 2
