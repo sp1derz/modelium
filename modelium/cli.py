@@ -291,7 +291,14 @@ def serve(
                 # Re-raise HTTP exceptions (they're intentional)
                 raise
             except Exception as e:
+                import traceback
+                error_traceback = traceback.format_exc()
+                logger.error(f"❌ Error during inference: {e}")
+                logger.error(f"   Exception type: {type(e)}")
+                logger.error(f"   Exception args: {e.args}")
+                logger.error(f"   Full traceback:\n{error_traceback}")
                 console.print(f"[red]Inference error: {e}[/red]")
+                
                 latency_ms = (time.time() - start_time) * 1000
                 metrics.record_request(
                     model=model_name,
@@ -300,7 +307,13 @@ def serve(
                     status="error",
                     gpu=model.target_gpu
                 )
-                raise HTTPException(status_code=500, detail=str(e))
+                
+                # Return detailed error
+                error_detail = str(e)
+                if hasattr(e, 'args') and e.args:
+                    error_detail = f"{type(e).__name__}: {e.args[0] if e.args else str(e)}"
+                
+                raise HTTPException(status_code=500, detail=error_detail)
         
         @app.get("/health")
         async def health():
