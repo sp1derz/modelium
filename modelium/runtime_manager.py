@@ -1006,7 +1006,15 @@ max_batch_size: 32
             
             if model_name not in self._loaded_models:
                 self.logger.error(f"   ❌ Model '{model_name}' not in loaded models")
-                self.logger.debug(f"   Available models: {list(self._loaded_models.keys())}")
+                self.logger.error(f"   Available models in RuntimeManager: {list(self._loaded_models.keys())}")
+                self.logger.error(f"   💡 Model may have been unloaded by brain or failed to load")
+                # Check if it's in Ray Serve
+                try:
+                    from ray import serve
+                    ray_routes = serve.list_deployments()
+                    self.logger.error(f"   Ray Serve deployments: {list(ray_routes.keys())}")
+                except:
+                    pass
                 return {"error": "Model not loaded"}
             
             info = self._loaded_models[model_name]

@@ -211,14 +211,19 @@ class Orchestrator:
                 
                 if action_type == "evict" and model_name:
                     logger.info(f"🧠 Brain decision: Unload {model_name} - {reasoning}")
+                    # Get runtime before unloading (for metrics)
+                    model_info = self.registry.get_model(model_name)
+                    runtime = model_info.runtime if model_info else "unknown"
+                    
                     success = self.runtime_manager.unload_model(model_name)
                     if success:
                         self.registry.update_model(model_name, status=ModelStatus.UNLOADED)
-                        self.metrics.record_model_unload(
-                            self.registry.get_model(model_name).runtime if self.registry.get_model(model_name) else "unknown",
-                            "success"
-                        )
+                        self.metrics.record_model_unload(runtime, "success")
                         self.metrics.record_orchestration_decision("unload", f"brain_{reasoning}")
+                        logger.info(f"   ✅ {model_name} unloaded successfully (removed from RuntimeManager)")
+                    else:
+                        logger.error(f"   ❌ Failed to unload {model_name} (may already be unloaded)")
+                        self.metrics.record_model_unload(runtime, "error")
                 elif action_type == "keep" and model_name:
                     logger.debug(f"🧠 Brain decision: Keep {model_name} - {reasoning}")
                 elif action_type == "load" and model_name:
