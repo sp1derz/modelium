@@ -605,17 +605,59 @@ max_batch_size: 32
         
         try:
             if runtime == "vllm":
-                # vLLM uses OpenAI format
+                # vLLM uses OpenAI-compatible API
+                # Try Chat Completions first (preferred in vLLM 0.10+)
+                endpoint = info['endpoint']
+                
+                # Try /v1/chat/completions first (works for most models in vLLM 0.10+)
+                try:
+                    resp = requests.post(
+                        f"{endpoint}/v1/chat/completions",
+                        json={
+                            "model": model_name,
+                            "messages": [
+                                {"role": "user", "content": prompt}
+                            ],
+                            "max_tokens": max_tokens,
+                            "temperature": kwargs.get("temperature", 0.7),
+                        },
+                        timeout=30
+                    )
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        # Extract text from chat format
+                        if "choices" in result and len(result["choices"]) > 0:
+                            content = result["choices"][0].get("message", {}).get("content", "")
+                            return {
+                                "text": content,
+                                "choices": result.get("choices", []),
+                                "usage": result.get("usage", {})
+                            }
+                    elif resp.status_code == 400:
+                        # If chat completions not supported, try legacy completions
+                        self.logger.debug(f"Chat completions not supported, trying legacy completions API")
+                    else:
+                        resp.raise_for_status()
+                except requests.exceptions.HTTPError as e:
+                    if "does not support" in str(e) or "400" in str(e):
+                        # Fall back to legacy completions API
+                        self.logger.debug(f"Chat completions failed, trying legacy completions: {e}")
+                    else:
+                        raise
+                
+                # Fallback to legacy /v1/completions API
                 resp = requests.post(
-                    f"{info['endpoint']}/v1/completions",
+                    f"{endpoint}/v1/completions",
                     json={
                         "model": model_name,
                         "prompt": prompt,
                         "max_tokens": max_tokens,
-                        **kwargs
+                        "temperature": kwargs.get("temperature", 0.7),
+                        **{k: v for k, v in kwargs.items() if k != "temperature"}
                     },
                     timeout=30
                 )
+                resp.raise_for_status()
                 return resp.json()
             
             elif runtime == "triton":

@@ -718,6 +718,7 @@ done
 # ============================================
 test_step "STEP 13: Testing inference"
 
+# Try inference - vLLM 0.10+ may use Chat Completions API
 INFERENCE_RESULT=$(curl -s -X POST http://localhost:8000/predict/$FIRST_MODEL \
   -H "Content-Type: application/json" \
   -d '{
@@ -725,7 +726,7 @@ INFERENCE_RESULT=$(curl -s -X POST http://localhost:8000/predict/$FIRST_MODEL \
     "organizationId": "test-company",
     "max_tokens": 20,
     "temperature": 0.7
-  }')
+  }' 2>&1)
 
 if echo "$INFERENCE_RESULT" | grep -q "choices\|text\|error"; then
     test_success "Inference request completed"
