@@ -776,32 +776,50 @@ max_batch_size: 32
                 def __call__(self, request):
                     import torch
                     
-                    # Ray Serve can pass request as dict or Starlette Request object
-                    # Handle both cases
-                    if hasattr(request, "json"):  # Starlette Request object
-                        # For sync deployments, Ray Serve should pass dict, but handle Request object
+                    # Ray Serve can pass request in different formats
+                    # Handle dict, Starlette Request, or raw body
+                    request_dict = {}
+                    
+                    if isinstance(request, dict):
+                        # Most common case - Ray Serve auto-parses JSON to dict
+                        request_dict = request
+                    elif hasattr(request, "json"):  # Starlette Request object
+                        # Try to get JSON body from Request object
                         try:
-                            # Try to get JSON body
-                            if hasattr(request, "_json"):
+                            import json
+                            if hasattr(request, "body"):
+                                # Read body and parse JSON
+                                body = request.body
+                                if isinstance(body, bytes):
+                                    body = body.decode('utf-8')
+                                request_dict = json.loads(body) if body else {}
+                            elif hasattr(request, "_json"):
                                 request_dict = request._json
-                            elif hasattr(request, "json"):
-                                # If it's a coroutine, we can't await it in sync context
-                                # Ray Serve should handle this, but let's try to get it
-                                import json
-                                if hasattr(request, "body"):
-                                    request_dict = json.loads(request.body.decode())
-                                else:
-                                    request_dict = {}
                             else:
-                                request_dict = {}
+                                # Try calling json() if it's a method
+                                if callable(request.json):
+                                    # This might be async, but Ray Serve should handle it
+                                    # For now, try to get body directly
+                                    request_dict = {}
+                        except Exception as e:
+                            self.logger.warning(f"Could not parse Request object: {e}")
+                            request_dict = {}
+                    elif isinstance(request, str):
+                        # Raw JSON string
+                        try:
+                            import json
+                            request_dict = json.loads(request)
                         except:
                             request_dict = {}
-                    elif isinstance(request, dict):
-                        request_dict = request
                     else:
                         # Try to convert to dict
                         try:
-                            request_dict = dict(request) if hasattr(request, "__iter__") and not isinstance(request, str) else {}
+                            if hasattr(request, "__dict__"):
+                                request_dict = request.__dict__
+                            elif hasattr(request, "__iter__") and not isinstance(request, (str, bytes)):
+                                request_dict = dict(request)
+                            else:
+                                request_dict = {}
                         except:
                             request_dict = {}
                     
