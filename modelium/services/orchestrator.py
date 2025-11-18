@@ -220,12 +220,17 @@ class Orchestrator:
             model_name: Name of discovered model
             model_path: Path to model directory
         """
-        logger.info(f"📋 New model discovered: {model_name} at {model_path}")
+        logger.info(f"")
+        logger.info(f"=" * 60)
+        logger.info(f"📋 ORCHESTRATOR CALLBACK: {model_name}")
+        logger.info(f"   Path: {model_path}")
         logger.info(f"   Orchestrator callback triggered!")
+        logger.info(f"=" * 60)
         
         try:
             path = Path(model_path).resolve()  # Resolve to absolute path
-            logger.info(f"   Resolved path: {path}")
+            logger.info(f"   ✅ Resolved path: {path}")
+            logger.info(f"   Path exists: {path.exists()}")
             
             # 1. ANALYZE: Read config.json
             config_path = path / "config.json"
