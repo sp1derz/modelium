@@ -249,6 +249,9 @@ def serve(
             
             # Run inference via RuntimeManager (automatically routes to correct runtime)
             try:
+                logger.info(f"🔍 API: Starting inference for {model_name}")
+                logger.debug(f"   Request: prompt={request.prompt[:100]}..., max_tokens={request.max_tokens}, temp={request.temperature}")
+                
                 result = runtime_manager.inference(
                     model_name=model_name,
                     prompt=request.prompt,
@@ -256,21 +259,37 @@ def serve(
                     temperature=request.temperature,
                 )
                 
+                logger.debug(f"   Inference result type: {type(result)}")
+                logger.debug(f"   Inference result keys: {result.keys() if isinstance(result, dict) else 'not a dict'}")
+                
                 # Record metrics
                 latency_ms = (time.time() - start_time) * 1000
+                
+                # Safe check for error in result
+                has_error = False
+                if isinstance(result, dict):
+                    has_error = "error" in result
+                else:
+                    logger.warning(f"   ⚠️  Result is not a dict: {type(result)}")
+                
                 metrics.record_request(
                     model=model_name,
                     runtime=model.runtime,
                     latency_ms=latency_ms,
-                    status="success" if "error" not in result else "error",
+                    status="success" if not has_error else "error",
                     gpu=model.target_gpu
                 )
                 
-                if "error" in result:
-                    raise HTTPException(status_code=500, detail=result["error"])
+                if has_error:
+                    error_msg = result.get("error", "Unknown error")
+                    logger.error(f"   ❌ Inference returned error: {error_msg}")
+                    raise HTTPException(status_code=500, detail=error_msg)
                 
                 return result
                 
+            except HTTPException:
+                # Re-raise HTTP exceptions (they're intentional)
+                raise
             except Exception as e:
                 console.print(f"[red]Inference error: {e}[/red]")
                 latency_ms = (time.time() - start_time) * 1000
