@@ -890,17 +890,25 @@ max_batch_size: 32
                         
                         if resp.status_code == 200:
                             result = resp.json()
+                            self.logger.debug(f"   Chat Completions response: {result}")
+                            
                             # Extract text from chat format
                             if "choices" in result and len(result["choices"]) > 0:
                                 content = result["choices"][0].get("message", {}).get("content", "")
-                                self.logger.debug(f"   ✅ Chat Completions API succeeded with model: {model_name_variant}")
+                                self.logger.info(f"   ✅ Chat Completions API succeeded with model: {model_name_variant}")
+                                self.logger.debug(f"   Generated content: {content[:100]}...")
                                 return {
                                     "text": content,
                                     "choices": result.get("choices", []),
                                     "usage": result.get("usage", {})
                                 }
-                            chat_success = True
-                            break
+                            else:
+                                # Response is 200 but no choices - log and try next variant or fallback
+                                self.logger.warning(f"   ⚠️  Chat Completions returned 200 but no choices in response")
+                                self.logger.debug(f"   Response keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
+                                self.logger.debug(f"   Full response: {result}")
+                                # Don't break - try next model name variant or fallback to completions
+                                continue
                         else:
                             # Read error message
                             try:
@@ -931,8 +939,8 @@ max_batch_size: 32
                         self.logger.debug(f"   Chat Completions exception with '{model_name_variant}': {e}")
                         continue  # Try next model name variant
                 
-                if chat_success:
-                    return  # Already returned above
+                # Note: chat_success is no longer used since we return immediately on success
+                # If we get here, Chat Completions didn't work, try Completions API
                 
                 # Fallback to legacy /v1/completions API
                 # Try all model name variants
