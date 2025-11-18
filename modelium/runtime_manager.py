@@ -525,23 +525,6 @@ class RuntimeManager:
         if stderr_path:
             self.logger.error(f"   📋 Check logs: {stderr_path}")
         return False
-            
-            # Check health endpoint
-            try:
-                resp = requests.get(f"http://localhost:{port}/health", timeout=2)
-                if resp.status_code == 200:
-                    elapsed = time.time() - start
-                    self.logger.info(f"   ✅ vLLM ready after {elapsed:.1f}s")
-                    return True
-            except requests.exceptions.RequestException:
-                pass
-            
-            check_count += 1
-            if check_count % 10 == 0:  # Log every 20 seconds
-                elapsed = time.time() - start
-                self.logger.info(f"   Still waiting... ({elapsed:.0f}s elapsed)")
-            
-            time.sleep(2)
         
         self.logger.error(f"   Timeout after {timeout}s")
         return False
