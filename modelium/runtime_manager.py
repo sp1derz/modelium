@@ -177,17 +177,19 @@ class RuntimeManager:
             self.logger.info(f"   Spawning vLLM on port {port}, GPU {gpu_id}")
             
             # Spawn process
+            self.logger.info(f"   Command: {' '.join(cmd)}")
             process = subprocess.Popen(
                 cmd,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                start_new_session=True
+                start_new_session=True,
+                text=True
             )
             
             # Wait for ready
-            self.logger.info(f"   Waiting for vLLM to start...")
-            if self._wait_for_vllm_ready(port, timeout=180):
+            self.logger.info(f"   Waiting for vLLM to start (PID: {process.pid})...")
+            if self._wait_for_vllm_ready(port, timeout=180, process=process):
                 self._vllm_processes[model_name] = process
                 self._loaded_models[model_name] = {
                     "runtime": "vllm",
@@ -199,8 +201,23 @@ class RuntimeManager:
                 self.logger.info(f"   ✅ {model_name} ready on port {port}")
                 return True
             else:
-                self.logger.error(f"   ❌ vLLM failed to start")
-                process.kill()
+                self.logger.error(f"   ❌ vLLM failed to start on port {port}")
+                # Check if process is still running
+                if process.poll() is None:
+                    self.logger.error(f"   Process still running but not responding")
+                else:
+                    self.logger.error(f"   Process exited with code: {process.returncode}")
+                    # Read stderr for error details
+                    try:
+                        stderr_output = process.stderr.read()
+                        if stderr_output:
+                            self.logger.error(f"   vLLM stderr: {stderr_output[:500]}")
+                    except:
+                        pass
+                try:
+                    process.kill()
+                except:
+                    pass
                 return False
                 
         except Exception as e:
@@ -233,17 +250,40 @@ class RuntimeManager:
             self.logger.error(f"vLLM unload failed: {e}")
             return False
     
-    def _wait_for_vllm_ready(self, port: int, timeout: int) -> bool:
+    def _wait_for_vllm_ready(self, port: int, timeout: int, process: Optional[subprocess.Popen] = None) -> bool:
         """Wait for vLLM to be ready."""
         start = time.time()
+        check_count = 0
         while time.time() - start < timeout:
+            # Check if process died
+            if process and process.poll() is not None:
+                self.logger.error(f"   vLLM process died with code {process.returncode}")
+                try:
+                    stderr_output = process.stderr.read()
+                    if stderr_output:
+                        self.logger.error(f"   vLLM stderr: {stderr_output[:1000]}")
+                except:
+                    pass
+                return False
+            
+            # Check health endpoint
             try:
                 resp = requests.get(f"http://localhost:{port}/health", timeout=2)
                 if resp.status_code == 200:
+                    elapsed = time.time() - start
+                    self.logger.info(f"   ✅ vLLM ready after {elapsed:.1f}s")
                     return True
-            except:
+            except requests.exceptions.RequestException:
                 pass
+            
+            check_count += 1
+            if check_count % 10 == 0:  # Log every 20 seconds
+                elapsed = time.time() - start
+                self.logger.info(f"   Still waiting... ({elapsed:.0f}s elapsed)")
+            
             time.sleep(2)
+        
+        self.logger.error(f"   Timeout after {timeout}s")
         return False
     
     # ==================== Triton ====================
