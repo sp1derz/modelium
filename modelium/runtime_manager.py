@@ -762,22 +762,20 @@ max_batch_size: 32
                 ray_actor_options={
                     "num_gpus": 1 if gpu_id >= 0 else 0,
                     "num_cpus": 2,
-                    "runtime_env": {"env_vars": ray_env} if ray_env else {},
-                    **({"accelerator_type": f"GPU:{gpu_id}"} if gpu_id >= 0 and accelerator_resources else {})
+                    # Don't use runtime_env with CUDA_VISIBLE_DEVICES - causes Ray GPU mapping errors
+                    # Let Ray assign GPU naturally, we'll use explicit device in model code
                 },
                 num_replicas=1,
             )
             class GPT2Model:
-                def __init__(self, model_path: str):
+                def __init__(self, model_path: str, target_gpu: int = -1):
                     import torch
                     from transformers import GPT2LMHeadModel, GPT2Tokenizer
                     import os
                     
                     self.logger = logging.getLogger(f"RayServe.{model_name}")
                     self.logger.info(f"Loading GPT-2 model from {model_path}...")
-                    
-                    # Get the target GPU from the parameter
-                    target_gpu = gpu_id
+                    self.logger.info(f"Target GPU: {target_gpu}")
                     
                     # Ray Serve assigns a GPU when num_gpus > 0
                     # We need to use the specific GPU that was requested
