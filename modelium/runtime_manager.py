@@ -716,14 +716,23 @@ max_batch_size: 32
                 # ALWAYS query vLLM's /v1/models to get the exact model identifier
                 # This ensures we use the correct name that vLLM expects
                 try:
-                    self.logger.debug(f"   Querying vLLM /v1/models to get exact model identifier...")
+                    self.logger.info(f"   🔍 Querying vLLM /v1/models to get exact model identifier...")
                     models_resp = requests.get(f"{endpoint}/v1/models", timeout=5)
                     if models_resp.status_code == 200:
                         models_data = models_resp.json()
+                        self.logger.debug(f"   vLLM /v1/models response: {models_data}")
                         if "data" in models_data and len(models_data["data"]) > 0:
                             # Use the first available model's id (this is what vLLM expects)
-                            actual_model_name = models_data["data"][0].get("id", model_name)
+                            model_info = models_data["data"][0]
+                            actual_model_name = model_info.get("id", model_name)
+                            
+                            # Check what tasks this model supports
+                            owned_by = model_info.get("owned_by", "")
                             self.logger.info(f"   ✅ Using vLLM model identifier: {actual_model_name}")
+                            self.logger.info(f"   📋 Model info: owned_by={owned_by}, id={actual_model_name}")
+                            
+                            # Log full model info for debugging
+                            self.logger.debug(f"   Full model info: {model_info}")
                         else:
                             self.logger.warning(f"   ⚠️  vLLM /v1/models returned no models, using stored: {actual_model_name}")
                     else:
@@ -828,7 +837,23 @@ max_batch_size: 32
                     self.logger.error(f"   Model: {actual_model_name}")
                     self.logger.error(f"   Endpoint: {endpoint}")
                     self.logger.error(f"   Error: {error_msg}")
-                    raise requests.exceptions.HTTPError(f"vLLM inference failed: {error_msg}", response=e.response)
+                    
+                    # Try to get more info about what the model supports
+                    try:
+                        models_resp = requests.get(f"{endpoint}/v1/models", timeout=5)
+                        if models_resp.status_code == 200:
+                            models_data = models_resp.json()
+                            self.logger.error(f"   📋 Available models: {models_data}")
+                    except:
+                        pass
+                    
+                    # Return error in a format the API can handle
+                    return {
+                        "error": f"vLLM inference failed: {error_msg}",
+                        "model": actual_model_name,
+                        "endpoint": endpoint,
+                        "suggestion": "Check vLLM logs at /tmp/modelium_vllm_logs/ for details"
+                    }
             
             elif runtime == "triton":
                 # Triton uses KServe v2 (simplified example)
