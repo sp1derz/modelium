@@ -374,7 +374,7 @@ class Orchestrator:
                 error=str(e)
             )
     
-    def _choose_runtime(self, analysis) -> str:
+    def _choose_runtime(self, analysis, model_name: str = None) -> str:
         """
         Choose best runtime based on model analysis and enabled runtimes.
         
@@ -385,7 +385,7 @@ class Orchestrator:
         - Fallback to whatever is enabled
         """
         arch = (analysis.architecture or "").lower()
-        model_name = (analysis.model_name or "").lower()
+        model_name_lower = (model_name or "").lower()
         
         # Check what's enabled
         enabled_runtimes = []
@@ -400,9 +400,9 @@ class Orchestrator:
         # Route GPT-2 to Ray Serve instead
         is_gpt2 = (
             "gpt2" in arch or 
-            "gpt2" in model_name or
+            "gpt2" in model_name_lower or
             arch == "gpt2" or
-            model_name == "gpt2"
+            model_name_lower == "gpt2"
         )
         
         if is_gpt2:
