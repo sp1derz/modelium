@@ -291,6 +291,10 @@ class Orchestrator:
             gpu_id = self._choose_gpu()
             logger.info(f"   Selected GPU: {gpu_id}")
             
+            # Set GPU immediately (even before loading) so it shows in API
+            self.registry.update_model(model_name, target_gpu=gpu_id)
+            logger.info(f"   ✅ GPU {gpu_id} assigned to {model_name} (will load now)")
+            
             try:
                 success = self.runtime_manager.load_model(
                     model_name=model_name,
@@ -304,7 +308,7 @@ class Orchestrator:
                     self.registry.update_model(
                         model_name,
                         status=ModelStatus.LOADED,
-                        target_gpu=gpu_id,
+                        target_gpu=gpu_id,  # Ensure it's set
                         loaded_at=time.time()
                     )
                     self.metrics.record_model_load(runtime, "success")
@@ -315,9 +319,11 @@ class Orchestrator:
                     logger.error(f"   Runtime: {runtime}")
                     logger.error(f"   GPU: {gpu_id}")
                     logger.error(f"   ⚠️  Check RuntimeManager logs above for detailed error messages")
+                    # Keep GPU assigned even on error (for debugging)
                     self.registry.update_model(
                         model_name, 
                         status=ModelStatus.ERROR,
+                        target_gpu=gpu_id,  # Keep GPU visible
                         error=f"Failed to load with {runtime} (check logs)"
                     )
                     self.metrics.record_model_load(runtime, "error")
@@ -378,33 +384,49 @@ class Orchestrator:
     
     def _choose_gpu(self) -> int:
         """Choose GPU with most free memory."""
+        # Try PyTorch first
         try:
             import torch
-            if not torch.cuda.is_available():
-                logger.warning("   ⚠️  CUDA not available, using GPU 0 as fallback")
-                return 0
-            
-            gpu_count = torch.cuda.device_count()
-            logger.info(f"   🔍 Found {gpu_count} GPU(s)")
-            
-            if gpu_count == 0:
-                logger.warning("   ⚠️  No GPUs detected, using GPU 0 as fallback")
-                return 0
-            
-            # Simple: Choose GPU with lowest utilization
-            best_gpu = 0
-            min_allocated = float('inf')
-            
-            for i in range(gpu_count):
-                allocated = torch.cuda.memory_allocated(i)
-                reserved = torch.cuda.memory_reserved(i)
-                logger.debug(f"   GPU {i}: {allocated / 1e9:.2f}GB allocated, {reserved / 1e9:.2f}GB reserved")
-                if allocated < min_allocated:
-                    min_allocated = allocated
-                    best_gpu = i
-            
-            logger.info(f"   ✅ Selected GPU {best_gpu} (lowest utilization: {min_allocated / 1e9:.2f}GB)")
-            return best_gpu
+            if torch.cuda.is_available():
+                gpu_count = torch.cuda.device_count()
+                logger.info(f"   🔍 PyTorch detected {gpu_count} GPU(s)")
+                
+                if gpu_count > 0:
+                    # Simple: Choose GPU with lowest utilization
+                    best_gpu = 0
+                    min_allocated = float('inf')
+                    
+                    for i in range(gpu_count):
+                        allocated = torch.cuda.memory_allocated(i)
+                        reserved = torch.cuda.memory_reserved(i)
+                        logger.debug(f"   GPU {i}: {allocated / 1e9:.2f}GB allocated, {reserved / 1e9:.2f}GB reserved")
+                        if allocated < min_allocated:
+                            min_allocated = allocated
+                            best_gpu = i
+                    
+                    logger.info(f"   ✅ Selected GPU {best_gpu} via PyTorch (lowest utilization: {min_allocated / 1e9:.2f}GB)")
+                    return best_gpu
         except Exception as e:
-            logger.warning(f"   ⚠️  Error choosing GPU: {e}, using GPU 0 as fallback")
-            return 0
+            logger.warning(f"   ⚠️  PyTorch GPU detection failed: {e}")
+        
+        # Fallback: Use nvidia-smi if PyTorch fails
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["nvidia-smi", "--list-gpus"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                gpu_count = len(result.stdout.strip().split('\n'))
+                if gpu_count > 0:
+                    logger.info(f"   🔍 nvidia-smi detected {gpu_count} GPU(s) (PyTorch CUDA unavailable)")
+                    logger.info(f"   ✅ Selected GPU 0 via nvidia-smi fallback")
+                    return 0
+        except Exception as e:
+            logger.warning(f"   ⚠️  nvidia-smi fallback failed: {e}")
+        
+        # Last resort: Return 0 (assume GPU 0 exists)
+        logger.warning("   ⚠️  Could not detect GPUs, assuming GPU 0 exists")
+        return 0
