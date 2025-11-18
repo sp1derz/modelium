@@ -76,17 +76,40 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo "Linux detected - checking Python development headers..."
     
     # Check for Python headers (required for vLLM CUDA compilation)
+    # Get the Python version from the venv
+    PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+    PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
+    PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
+    
+    echo "   Python version in venv: $PYTHON_VERSION"
+    
     if ! python3 -c "import sysconfig; import os; h = os.path.join(sysconfig.get_path('include'), 'Python.h'); assert os.path.exists(h), f'Missing: {h}'" 2>/dev/null; then
-        echo "⚠️  Python development headers not found!"
-        echo "   Installing python3-devel..."
+        echo "⚠️  Python development headers not found for Python $PYTHON_VERSION!"
+        echo "   Installing python${PYTHON_MAJOR}${PYTHON_MINOR}-devel..."
+        
         if command -v yum &>/dev/null; then
-            sudo yum install -y python3-devel || echo "⚠️  Failed to install python3-devel (may need sudo)"
+            # Try version-specific package first
+            if sudo yum install -y python${PYTHON_MAJOR}${PYTHON_MINOR}-devel 2>/dev/null; then
+                echo "   ✅ Installed python${PYTHON_MAJOR}${PYTHON_MINOR}-devel"
+            elif sudo yum install -y python${PYTHON_MAJOR}-devel 2>/dev/null; then
+                echo "   ✅ Installed python${PYTHON_MAJOR}-devel (may work for ${PYTHON_VERSION})"
+            else
+                echo "   ⚠️  Could not install version-specific headers"
+                echo "   💡 Solution: Use Python ${PYTHON_MAJOR}.9 for venv to match system headers"
+                echo "   Or: Install Python ${PYTHON_VERSION} from source with development headers"
+            fi
         elif command -v apt-get &>/dev/null; then
-            sudo apt-get install -y python3-dev || echo "⚠️  Failed to install python3-dev (may need sudo)"
+            if sudo apt-get install -y python${PYTHON_MAJOR}.${PYTHON_MINOR}-dev 2>/dev/null; then
+                echo "   ✅ Installed python${PYTHON_MAJOR}.${PYTHON_MINOR}-dev"
+            elif sudo apt-get install -y python${PYTHON_MAJOR}-dev 2>/dev/null; then
+                echo "   ✅ Installed python${PYTHON_MAJOR}-dev (may work for ${PYTHON_VERSION})"
+            else
+                echo "   ⚠️  Could not install version-specific headers"
+            fi
         else
-            echo "⚠️  Please install Python development headers manually:"
-            echo "   Amazon Linux: sudo yum install python3-devel"
-            echo "   Ubuntu/Debian: sudo apt-get install python3-dev"
+            echo "   ⚠️  Please install Python development headers manually:"
+            echo "   Amazon Linux: sudo yum install python${PYTHON_MAJOR}${PYTHON_MINOR}-devel"
+            echo "   Ubuntu/Debian: sudo apt-get install python${PYTHON_MAJOR}.${PYTHON_MINOR}-dev"
         fi
     else
         echo "✅ Python development headers found"
