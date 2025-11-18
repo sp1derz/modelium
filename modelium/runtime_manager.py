@@ -698,18 +698,62 @@ max_batch_size: 32
             deployment = Model.bind(str(model_path))
             serve.run(deployment, name=model_name, route_prefix=f"/{model_name}")
             
+            endpoint = f"http://localhost:8002/{model_name}"
             self._loaded_models[model_name] = {
                 "runtime": "ray",
-                "endpoint": f"http://localhost:8002/{model_name}",
+                "endpoint": endpoint,
                 "gpu": gpu_id,
+                "model_path": str(model_path),
             }
             
-            self.logger.info(f"   ✅ {model_name} deployed via Ray")
-            return True
+            # Wait for Ray Serve to be ready
+            self.logger.info(f"   ⏳ Waiting for Ray Serve deployment to be ready...")
+            if self._wait_for_ray_ready(endpoint, timeout=300):
+                self.logger.info(f"   ✅ {model_name} deployed and ready via Ray Serve")
+                return True
+            else:
+                self.logger.error(f"   ❌ Ray Serve deployment not ready after timeout")
+                # Clean up
+                try:
+                    serve.delete(model_name)
+                except:
+                    pass
+                del self._loaded_models[model_name]
+                return False
             
         except Exception as e:
             self.logger.error(f"Ray load failed: {e}")
             return False
+    
+    def _wait_for_ray_ready(self, endpoint: str, timeout: int = 300) -> bool:
+        """Wait for Ray Serve deployment to be ready."""
+        import time
+        start = time.time()
+        check_count = 0
+        
+        while time.time() - start < timeout:
+            check_count += 1
+            try:
+                # Try to hit the endpoint
+                resp = requests.get(endpoint, timeout=2)
+                if resp.status_code in [200, 404]:  # 404 is OK, means endpoint exists
+                    elapsed = time.time() - start
+                    self.logger.info(f"   ✅ Ray Serve ready after {elapsed:.1f}s")
+                    return True
+            except requests.exceptions.ConnectionError:
+                # Connection refused is normal while starting
+                if check_count % 10 == 0:  # Log every 20 seconds
+                    elapsed = time.time() - start
+                    self.logger.debug(f"   Ray Serve not ready yet ({elapsed:.0f}s elapsed)...")
+            except Exception as e:
+                # Other errors might mean it's starting
+                if check_count % 10 == 0:
+                    self.logger.debug(f"   Ray Serve check error (normal during startup): {e}")
+            
+            time.sleep(2)
+        
+        self.logger.error(f"   ❌ Ray Serve not ready after {timeout}s")
+        return False
     
     def _unload_ray(self, model_name: str) -> bool:
         """Unload from Ray Serve."""
