@@ -301,6 +301,21 @@ class RuntimeManager:
                 self.logger.info(f"   Waiting for vLLM to start (PID: {process.pid})...")
                 self.logger.info(f"   vLLM stderr log: {stderr_path}")
                 if self._wait_for_vllm_ready(port, timeout=180, process=process, stderr_path=stderr_path):
+                    # Get actual model name from vLLM (might be different from our model_name)
+                    vllm_model_name = model_name
+                    try:
+                        models_resp = requests.get(f"http://localhost:{port}/v1/models", timeout=5)
+                        if models_resp.status_code == 200:
+                            models_data = models_resp.json()
+                            if "data" in models_data and len(models_data["data"]) > 0:
+                                vllm_model_name = models_data["data"][0].get("id", model_name)
+                                self.logger.info(f"   vLLM model identifier: {vllm_model_name}")
+                    except Exception as e:
+                        # If we can't query, use model path component as fallback
+                        # vLLM often uses the model path or last component
+                        vllm_model_name = str(model_path).split("/")[-1] or model_name
+                        self.logger.debug(f"   Could not query vLLM models, using fallback: {vllm_model_name}")
+                    
                     self._vllm_processes[model_name] = process
                     self._loaded_models[model_name] = {
                         "runtime": "vllm",
@@ -308,8 +323,9 @@ class RuntimeManager:
                         "port": port,
                         "gpu": gpu_id,
                         "pid": process.pid,
+                        "vllm_model_name": vllm_model_name,  # Store actual vLLM model identifier
                     }
-                    self.logger.info(f"   ✅ {model_name} ready on port {port}")
+                    self.logger.info(f"   ✅ {model_name} ready on port {port} (vLLM name: {vllm_model_name})")
                     # Clean up stderr file on success
                     try:
                         import os
