@@ -215,20 +215,29 @@ class RuntimeManager:
             
             self.logger.info(f"   Spawning vLLM on port {port}, GPU {gpu_id}")
             
-            # Spawn process
+            # Spawn process with stderr redirected to capture errors
             self.logger.info(f"   Command: {' '.join(cmd)}")
-            process = subprocess.Popen(
-                cmd,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
-                text=True
-            )
             
-            # Wait for ready
-            self.logger.info(f"   Waiting for vLLM to start (PID: {process.pid})...")
-            if self._wait_for_vllm_ready(port, timeout=180, process=process):
+            # Use a temporary file to capture stderr (avoids buffer issues)
+            import tempfile
+            stderr_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.log')
+            stderr_path = stderr_file.name
+            stderr_file.close()
+            
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=open(stderr_path, 'w'),
+                    start_new_session=True,
+                    text=True
+                )
+                
+                # Wait for ready
+                self.logger.info(f"   Waiting for vLLM to start (PID: {process.pid})...")
+                self.logger.info(f"   vLLM stderr log: {stderr_path}")
+                if self._wait_for_vllm_ready(port, timeout=180, process=process, stderr_path=stderr_path):
                 self._vllm_processes[model_name] = process
                 self._loaded_models[model_name] = {
                     "runtime": "vllm",
@@ -246,31 +255,30 @@ class RuntimeManager:
                     self.logger.error(f"   Process still running but not responding")
                 else:
                     self.logger.error(f"   Process exited with code: {process.returncode}")
-                    # Read stderr for error details (read all available)
+                    # Read stderr from file
                     try:
-                        # Try to read stderr (non-blocking)
-                        import select
-                        if select.select([process.stderr], [], [], 0)[0]:
-                            stderr_output = process.stderr.read()
+                        with open(stderr_path, 'r') as f:
+                            stderr_output = f.read()
                             if stderr_output:
-                                # Log first 2000 chars of stderr
-                                self.logger.error(f"   vLLM stderr (first 2000 chars):")
-                                for line in stderr_output[:2000].split('\n')[:50]:  # First 50 lines
+                                self.logger.error(f"   vLLM stderr output:")
+                                # Show last 100 lines (most recent errors)
+                                lines = stderr_output.strip().split('\n')
+                                for line in lines[-100:]:
                                     if line.strip():
                                         self.logger.error(f"      {line}")
                     except Exception as e:
-                        self.logger.error(f"   Could not read stderr: {e}")
-                        # Try alternative: communicate with timeout
-                        try:
-                            _, stderr = process.communicate(timeout=1)
-                            if stderr:
-                                self.logger.error(f"   vLLM stderr: {stderr[:1000]}")
-                        except:
-                            pass
+                        self.logger.error(f"   Could not read stderr file {stderr_path}: {e}")
                 try:
                     process.kill()
                 except:
                     pass
+                finally:
+                    # Clean up stderr file
+                    try:
+                        import os
+                        os.unlink(stderr_path)
+                    except:
+                        pass
                 return False
                 
         except Exception as e:
@@ -303,7 +311,7 @@ class RuntimeManager:
             self.logger.error(f"vLLM unload failed: {e}")
             return False
     
-    def _wait_for_vllm_ready(self, port: int, timeout: int, process: Optional[subprocess.Popen] = None) -> bool:
+    def _wait_for_vllm_ready(self, port: int, timeout: int, process: Optional[subprocess.Popen] = None, stderr_path: Optional[str] = None) -> bool:
         """Wait for vLLM to be ready."""
         start = time.time()
         check_count = 0
@@ -311,12 +319,19 @@ class RuntimeManager:
             # Check if process died
             if process and process.poll() is not None:
                 self.logger.error(f"   vLLM process died with code {process.returncode}")
-                try:
-                    stderr_output = process.stderr.read()
-                    if stderr_output:
-                        self.logger.error(f"   vLLM stderr: {stderr_output[:1000]}")
-                except:
-                    pass
+                # Read stderr from file if available
+                if stderr_path:
+                    try:
+                        with open(stderr_path, 'r') as f:
+                            stderr_output = f.read()
+                            if stderr_output:
+                                self.logger.error(f"   vLLM stderr (last 50 lines):")
+                                lines = stderr_output.strip().split('\n')
+                                for line in lines[-50:]:
+                                    if line.strip():
+                                        self.logger.error(f"      {line}")
+                    except Exception as e:
+                        self.logger.error(f"   Could not read stderr: {e}")
                 return False
             
             # Check health endpoint
