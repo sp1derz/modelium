@@ -131,160 +131,68 @@ class Orchestrator:
             logger.error("❌ FATAL: Brain model is None! Orchestration cannot proceed.")
             raise RuntimeError("Brain model is required but not loaded")
         
-        # Brain is available - use it
-        try:
-            try:
-                logger.debug("🧠 Using Brain (Qwen) for orchestration decision...")
-                
-                # Build current state for brain
-                current_state = {
-                    "models_loaded": [
-                        {
-                            "name": m.name,
-                            "runtime": m.runtime,
-                            "gpu": m.target_gpu if hasattr(m, 'target_gpu') else None,
-                            "qps": self.metrics.get_model_qps(m.name, m.runtime),
-                            "idle_seconds": self.metrics.get_model_idle_seconds(m.name, m.runtime),
-                            "loaded_at": m.loaded_at,
-                        }
-                        for m in loaded_models
-                    ],
-                    "gpu_memory_pressure": gpu_memory_pressure,
-                    "total_gpus": self.config.gpu.count if self.config.gpu.count else 1,
-                }
-                
-                # Get policies dict
-                policies_dict = {
-                    "evict_after_idle_seconds": idle_threshold,
-                    "always_loaded": always_loaded,
-                    "evict_when_memory_above_percent": policies.evict_when_memory_above_percent,
-                }
-                
-                # Ask brain for decisions
-                brain_decision = self.brain.make_orchestration_decision(current_state, policies_dict)
-                
-                if brain_decision and "actions" in brain_decision:
-                    logger.info(f"🧠 Brain made {len(brain_decision.get('actions', []))} decisions")
-                    
-                    # Execute brain's decisions
-                    for action in brain_decision.get("actions", []):
-                        action_type = action.get("action")
-                        model_name = action.get("model")
-                        reasoning = action.get("reasoning", "")
-                        
-                        if action_type == "evict" and model_name:
-                            logger.info(f"🧠 Brain decision: Unload {model_name} - {reasoning}")
-                            success = self.runtime_manager.unload_model(model_name)
-                            if success:
-                                self.registry.update_model(model_name, status=ModelStatus.UNLOADED)
-                                self.metrics.record_model_unload(
-                                    self.registry.get_model(model_name).runtime if self.registry.get_model(model_name) else "unknown",
-                                    "success"
-                                )
-                                self.metrics.record_orchestration_decision("unload", f"brain_{reasoning}")
-                        elif action_type == "keep" and model_name:
-                            logger.debug(f"🧠 Brain decision: Keep {model_name} - {reasoning}")
-                        # Note: "load" actions are handled by on_model_discovered
-                    
-                    # Brain made decisions, return early
-                    return
-                else:
-                    logger.warning(f"🧠 Brain returned invalid decision (no actions), using rules")
-                    
-            except Exception as e:
-                logger.error(f"❌ Brain decision failed: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                # Brain is mandatory - don't fallback, raise error
-                raise RuntimeError(f"Brain orchestration failed: {e}")
+        # Brain is available - use it (MANDATORY)
+        logger.debug("🧠 Using Brain (Qwen) for orchestration decision...")
         
-        # This should never be reached if brain is working
-        logger.error("❌ Brain decision returned no actions - this should not happen")
-        raise RuntimeError("Brain decision returned no actions")
-            # Get comprehensive metrics
-            idle_seconds = self.metrics.get_model_idle_seconds(model.name, model.runtime)
-            qps = self.metrics.get_model_qps(model.name, model.runtime)
+        # Build current state for brain
+        current_state = {
+            "models_loaded": [
+                {
+                    "name": m.name,
+                    "runtime": m.runtime,
+                    "gpu": m.target_gpu if hasattr(m, 'target_gpu') else None,
+                    "qps": self.metrics.get_model_qps(m.name, m.runtime),
+                    "idle_seconds": self.metrics.get_model_idle_seconds(m.name, m.runtime),
+                    "loaded_at": m.loaded_at,
+                }
+                for m in loaded_models
+            ],
+            "gpu_memory_pressure": gpu_memory_pressure,
+            "total_gpus": self.config.gpu.count if self.config.gpu.count else 1,
+        }
+        
+        # Get policies dict
+        policies_dict = {
+            "evict_after_idle_seconds": idle_threshold,
+            "always_loaded": always_loaded,
+            "evict_when_memory_above_percent": policies.evict_when_memory_above_percent,
+        }
+        
+        # Ask brain for decisions (MANDATORY - no fallback)
+        try:
+            brain_decision = self.brain.make_orchestration_decision(current_state, policies_dict)
+        except Exception as e:
+            logger.error(f"❌ Brain decision failed: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Brain is mandatory - don't fallback, raise error
+            raise RuntimeError(f"Brain orchestration failed: {e}")
+        
+        if brain_decision and "actions" in brain_decision:
+            logger.info(f"🧠 Brain made {len(brain_decision.get('actions', []))} decisions")
             
-            # GRACE PERIOD: Don't unload models that were just loaded (within 60 seconds)
-            # This prevents immediately unloading models that just finished loading
-            if model.loaded_at:
-                time_since_load = time.time() - model.loaded_at
-                grace_period = 120  # 60 seconds grace period after loading
-                if time_since_load < grace_period:
-                    logger.debug(
-                        f"✅ Keeping {model.name}: grace period "
-                        f"({time_since_load:.0f}s since load, {grace_period}s grace period)"
-                    )
-                    continue
-            
-            # Fix idle_seconds if it's infinity (model never had a request)
-            # Use time since load if available, otherwise use a reasonable default
-            if idle_seconds == float('inf'):
-                if model.loaded_at:
-                    idle_seconds = time.time() - model.loaded_at
-                    logger.debug(f"   {model.name}: No requests yet, using time since load: {idle_seconds:.0f}s")
-                else:
-                    # Fallback: assume it was just loaded
-                    idle_seconds = 0
-                    logger.debug(f"   {model.name}: No requests and no loaded_at, assuming just loaded")
-            
-            # RULE 1: Never unload always_loaded models
-            if model.name in always_loaded:
-                logger.debug(f"✅ Keeping {model.name}: always_loaded policy")
-                continue
-            
-            # RULE 2: Keep if actively used (QPS > 0.5)
-            # Even 1 request per 2 seconds means someone is using it!
-            if qps > 0.5:
-                logger.debug(f"✅ Keeping {model.name}: active (QPS: {qps:.2f})")
-                continue
-            
-            # RULE 3: Keep if has ANY QPS (even 0.1)
-            # Someone is using it occasionally, don't be aggressive
-            if qps > 0.01:  # More than 1 request per 100 seconds
-                logger.debug(f"✅ Keeping {model.name}: occasional use (QPS: {qps:.2f})")
-                continue
-            
-            # RULE 4: Keep if recently used (within idle threshold)
-            if idle_seconds < idle_threshold:
-                logger.debug(f"✅ Keeping {model.name}: recently used ({idle_seconds:.0f}s ago)")
-                continue
-            
-            # RULE 5: Unload if completely idle AND:
-            #   - Idle > threshold AND
-            #   - QPS = 0 (truly unused) AND
-            #   - (GPU memory pressure OR idle > 2x threshold)
-            
-            completely_idle = (qps == 0 and idle_seconds > idle_threshold)
-            
-            if completely_idle:
-                # Extra condition: Only unload if GPU needs space OR model is REALLY idle
-                should_unload = (
-                    gpu_memory_pressure or  # We need GPU memory
-                    idle_seconds > (idle_threshold * 2)  # Model idle for 2x threshold (10+ min)
-                )
+            # Execute brain's decisions
+            for action in brain_decision.get("actions", []):
+                action_type = action.get("action")
+                model_name = action.get("model")
+                reasoning = action.get("reasoning", "")
                 
-                if should_unload:
-                    logger.info(
-                        f"🔽 Unloading idle model: {model.name} "
-                        f"(idle: {idle_seconds:.0f}s, QPS: {qps:.2f}, "
-                        f"GPU pressure: {gpu_memory_pressure})"
-                    )
-                    
-                    success = self.runtime_manager.unload_model(model.name)
+                if action_type == "evict" and model_name:
+                    logger.info(f"🧠 Brain decision: Unload {model_name} - {reasoning}")
+                    success = self.runtime_manager.unload_model(model_name)
                     if success:
-                        self.registry.update_model(model.name, status=ModelStatus.UNLOADED)
-                        self.metrics.record_model_unload(model.runtime, "success")
-                        self.metrics.record_orchestration_decision(
-                            "unload", 
-                            f"idle_{idle_seconds}s_gpu_pressure_{gpu_memory_pressure}"
+                        self.registry.update_model(model_name, status=ModelStatus.UNLOADED)
+                        self.metrics.record_model_unload(
+                            self.registry.get_model(model_name).runtime if self.registry.get_model(model_name) else "unknown",
+                            "success"
                         )
-                else:
-                    # Idle but we have GPU space - keep it loaded (why not?)
-                    logger.debug(
-                        f"⏸️  {model.name} idle ({idle_seconds:.0f}s) but keeping "
-                        f"(GPU has space, might be used soon)"
-                    )
+                        self.metrics.record_orchestration_decision("unload", f"brain_{reasoning}")
+                elif action_type == "keep" and model_name:
+                    logger.debug(f"🧠 Brain decision: Keep {model_name} - {reasoning}")
+                # Note: "load" actions are handled by on_model_discovered
+        else:
+            logger.warning(f"🧠 Brain returned invalid decision (no actions)")
+            raise RuntimeError("Brain decision returned no actions")
     
     def _get_gpu_memory_pressure(self) -> bool:
         """
