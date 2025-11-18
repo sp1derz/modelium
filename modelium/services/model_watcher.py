@@ -134,6 +134,12 @@ class ModelWatcher:
         
         # Skip if already seen (but log it)
         if dir_str in self._seen_files:
+            # Get model name first
+            if dir_path.name:
+                model_name = dir_path.name
+            else:
+                model_name = "model"
+            
             logger.debug(f"   ⏭️  Skipping {model_name} (already processed)")
             # Check if model is still unloaded - if so, trigger callback again
             existing_model = self.registry.get_model(model_name)
