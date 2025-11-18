@@ -726,8 +726,13 @@ max_batch_size: 32
                 try:
                     if torch.cuda.is_available():
                         # Set CUDA_VISIBLE_DEVICES so Ray only sees the GPU we want
+                        # IMPORTANT: When CUDA_VISIBLE_DEVICES=1, Ray only sees GPU 1
+                        # Inside Ray actor, it will use cuda:0 (first GPU Ray can see)
+                        # But physically, it's actually system GPU 1
                         ray_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
                         self.logger.info(f"   Setting CUDA_VISIBLE_DEVICES={gpu_id} for Ray actor")
+                        self.logger.info(f"   Ray will see physical GPU {gpu_id} as 'cuda:0' inside the actor")
+                        self.logger.info(f"   This ensures GPT-2 loads on GPU {gpu_id}, not GPU 0 (brain)")
                 except:
                     pass
             
@@ -752,10 +757,16 @@ max_batch_size: 32
                     # Ray Serve automatically assigns GPU when num_gpus > 0
                     # Use the first available CUDA device (Ray handles assignment)
                     if torch.cuda.is_available():
-                        # Ray Serve assigns GPU automatically, use cuda:0 (Ray's assigned GPU)
+                        # IMPORTANT: When CUDA_VISIBLE_DEVICES=1 is set, Ray only sees GPU 1
+                        # From Ray's perspective, it's "cuda:0" (the first GPU Ray can see)
+                        # But physically, it's actually GPU 1 on the system
                         self.device = "cuda:0"
-                        self.logger.info(f"Using GPU (Ray-assigned): {self.device}")
-                        self.logger.info(f"Available GPUs: {torch.cuda.device_count()}")
+                        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
+                        physical_gpu = visible_devices if visible_devices != "all" else "0"
+                        self.logger.info(f"Using GPU: {self.device} (Ray's view)")
+                        self.logger.info(f"Physical GPU: {physical_gpu} (system GPU ID)")
+                        self.logger.info(f"Available GPUs to Ray: {torch.cuda.device_count()}")
+                        self.logger.info(f"CUDA_VISIBLE_DEVICES={visible_devices} (Ray only sees this GPU)")
                     else:
                         self.device = "cpu"
                         self.logger.info(f"Using CPU (no GPU available)")

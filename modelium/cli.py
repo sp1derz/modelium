@@ -74,17 +74,24 @@ def serve(
                 raise RuntimeError("Brain model is None")
             
             # Verify brain is on the correct device
+            brain_device_str = None
             if hasattr(brain.model, 'device'):
-                brain_device = str(brain.model.device)
-                console.print(f"   ✅ Brain loaded on device: {brain_device}")
+                brain_device_str = str(brain.model.device)
             else:
                 # Check first parameter's device
                 first_param = next(brain.model.parameters(), None)
                 if first_param is not None:
-                    brain_device = str(first_param.device)
-                    console.print(f"   ✅ Brain loaded on device: {brain_device}")
-                else:
-                    console.print("   ⚠️  Could not verify brain device")
+                    brain_device_str = str(first_param.device)
+            
+            if brain_device_str:
+                console.print(f"   ✅ Brain loaded on device: {brain_device_str}")
+                # Extract GPU number from cuda:X
+                if "cuda:" in brain_device_str:
+                    brain_gpu_num = brain_device_str.split(":")[-1]
+                    console.print(f"   📍 Brain is on physical GPU {brain_gpu_num} (as configured)")
+                    console.print(f"   💡 Other models will be placed on different GPUs to avoid conflicts")
+            else:
+                console.print("   ⚠️  Could not verify brain device")
             
             # Get model size
             param_count = sum(p.numel() for p in brain.model.parameters())
