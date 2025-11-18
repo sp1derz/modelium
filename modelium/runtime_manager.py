@@ -788,8 +788,12 @@ max_batch_size: 32
                 
                 # For GPT-2, try different model name formats
                 # vLLM might accept the full path or just "gpt2"
+                if actual_model_name is None:
+                    actual_model_name = model_name
+                    self.logger.warning(f"   ⚠️  actual_model_name was None, using model_name: {model_name}")
+                
                 model_names_to_try = [actual_model_name]
-                if "/" in actual_model_name and "gpt2" in actual_model_name.lower():
+                if actual_model_name and "/" in actual_model_name and "gpt2" in actual_model_name.lower():
                     # Extract just "gpt2" from path
                     path_parts = actual_model_name.split("/")
                     simple_name = [p for p in path_parts if "gpt2" in p.lower()][-1] if path_parts else None
