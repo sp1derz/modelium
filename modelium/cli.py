@@ -250,11 +250,20 @@ def serve(
         @app.post("/predict/{model_name}")
         async def predict(model_name: str, request: InferenceRequest):
             """Run inference on a model."""
+            # Get logger - must be inside function to work with FastAPI
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            logger.info(f"🔍 API: Received inference request for {model_name}")
+            logger.debug(f"   Request body: prompt={request.prompt[:100] if request.prompt else None}..., max_tokens={request.max_tokens}, temp={request.temperature}")
+            
             model = registry.get_model(model_name)
             if not model:
+                logger.error(f"   ❌ Model '{model_name}' not found in registry")
                 raise HTTPException(status_code=404, detail="Model not found")
             
             if model.status.value != "loaded":
+                logger.error(f"   ❌ Model '{model_name}' not loaded (status: {model.status.value})")
                 raise HTTPException(
                     status_code=503, 
                     detail=f"Model not loaded (status: {model.status.value})"
