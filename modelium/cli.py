@@ -79,18 +79,35 @@ def serve(
         console.print("Press Ctrl+C to stop")
         console.print()
         
-        # Set up logging to file
+        # Set up logging to file AND console with proper levels
         import logging
         log_file = Path("modelium.log")
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler()  # Also log to console
-            ]
-        )
+        
+        # Clear any existing handlers
+        root_logger = logging.getLogger()
+        root_logger.handlers.clear()
+        
+        # Create formatter
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        
+        # File handler - log everything
+        file_handler = logging.FileHandler(log_file, mode='a')
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        
+        # Console handler - log INFO and above
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        
+        # Configure root logger
+        root_logger.setLevel(logging.DEBUG)
+        root_logger.addHandler(file_handler)
+        root_logger.addHandler(console_handler)
+        
         console.print(f"📝 Logs will be written to: {log_file.absolute()}")
+        console.print(f"📝 Console logging: INFO and above")
+        console.print(f"📝 File logging: DEBUG and above")
         console.print()
         
         # Initialize services
@@ -304,11 +321,22 @@ def serve(
             except Exception as e:
                 import traceback
                 error_traceback = traceback.format_exc()
+                
+                # Get logger
+                logger = logging.getLogger(__name__)
+                
+                # Log to file (DEBUG level for full traceback)
                 logger.error(f"❌ Error during inference: {e}")
                 logger.error(f"   Exception type: {type(e)}")
                 logger.error(f"   Exception args: {e.args}")
                 logger.error(f"   Full traceback:\n{error_traceback}")
-                console.print(f"[red]Inference error: {e}[/red]")
+                
+                # Also print to console (user needs to see this!)
+                console.print(f"[red]❌ Inference error: {e}[/red]")
+                console.print(f"[red]   Exception type: {type(e)}[/red]")
+                console.print(f"[red]   Full traceback:[/red]")
+                for line in error_traceback.split('\n'):
+                    console.print(f"[red]{line}[/red]")
                 
                 latency_ms = (time.time() - start_time) * 1000
                 metrics.record_request(
@@ -319,10 +347,8 @@ def serve(
                     gpu=model.target_gpu
                 )
                 
-                # Return detailed error
-                error_detail = str(e)
-                if hasattr(e, 'args') and e.args:
-                    error_detail = f"{type(e).__name__}: {e.args[0] if e.args else str(e)}"
+                # Return detailed error with traceback
+                error_detail = f"{type(e).__name__}: {str(e)}\n\nTraceback:\n{error_traceback}"
                 
                 raise HTTPException(status_code=500, detail=error_detail)
         
