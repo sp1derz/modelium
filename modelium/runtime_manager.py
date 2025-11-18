@@ -935,7 +935,12 @@ max_batch_size: 32
                 return False
             
         except Exception as e:
-            self.logger.error(f"Ray load failed: {e}")
+            import traceback
+            self.logger.error(f"❌ Ray load failed for {model_name}: {e}")
+            self.logger.error(f"   Model path: {model_path}")
+            self.logger.error(f"   GPU: {gpu_id}")
+            self.logger.error(f"   Full traceback:")
+            self.logger.error(traceback.format_exc())
             return False
     
     def _wait_for_ray_ready(self, endpoint: str, timeout: int = 300) -> bool:
