@@ -786,39 +786,81 @@ max_batch_size: 32
                 except Exception as e:
                     self.logger.warning(f"   ⚠️  Could not query vLLM /v1/models: {e}, using stored: {actual_model_name}")
                 
+                # For GPT-2, try different model name formats
+                # vLLM might accept the full path or just "gpt2"
+                model_names_to_try = [actual_model_name]
+                if "/" in actual_model_name and "gpt2" in actual_model_name.lower():
+                    # Extract just "gpt2" from path
+                    path_parts = actual_model_name.split("/")
+                    simple_name = [p for p in path_parts if "gpt2" in p.lower()][-1] if path_parts else None
+                    if simple_name and simple_name != actual_model_name:
+                        model_names_to_try.append(simple_name)
+                        self.logger.info(f"   💡 Will try model names: {model_names_to_try}")
+                
                 # Try /v1/chat/completions first (preferred in vLLM 0.10+)
                 chat_completions_tried = False
-                try:
-                    self.logger.debug(f"   Trying Chat Completions API with model: {actual_model_name}")
-                    resp = requests.post(
-                        f"{endpoint}/v1/chat/completions",
-                        json={
-                            "model": actual_model_name,
-                            "messages": [
-                                {"role": "user", "content": prompt}
-                            ],
-                            "max_tokens": max_tokens,
-                            "temperature": kwargs.get("temperature", 0.7),
-                        },
-                        timeout=30
-                    )
-                    chat_completions_tried = True
-                    
-                    if resp.status_code == 200:
-                        result = resp.json()
-                        # Extract text from chat format
-                        if "choices" in result and len(result["choices"]) > 0:
-                            content = result["choices"][0].get("message", {}).get("content", "")
-                            self.logger.debug(f"   ✅ Chat Completions API succeeded")
-                            return {
-                                "text": content,
-                                "choices": result.get("choices", []),
-                                "usage": result.get("usage", {})
-                            }
+                chat_success = False
+                for model_name_variant in model_names_to_try:
+                    try:
+                        self.logger.debug(f"   Trying Chat Completions API with model: {model_name_variant}")
+                        resp = requests.post(
+                            f"{endpoint}/v1/chat/completions",
+                            json={
+                                "model": model_name_variant,
+                                "messages": [
+                                    {"role": "user", "content": prompt}
+                                ],
+                                "max_tokens": max_tokens,
+                                "temperature": kwargs.get("temperature", 0.7),
+                            },
+                            timeout=30
+                        )
+                        chat_completions_tried = True
+                        
+                        if resp.status_code == 200:
+                            result = resp.json()
+                            # Extract text from chat format
+                            if "choices" in result and len(result["choices"]) > 0:
+                                content = result["choices"][0].get("message", {}).get("content", "")
+                                self.logger.debug(f"   ✅ Chat Completions API succeeded with model: {model_name_variant}")
+                                return {
+                                    "text": content,
+                                    "choices": result.get("choices", []),
+                                    "usage": result.get("usage", {})
+                                }
+                            chat_success = True
+                            break
+                        else:
+                            # Read error message
+                            try:
+                                error_data = resp.json()
+                                error_msg = error_data.get("error", {}).get("message", resp.text)
+                            except:
+                                error_msg = resp.text
+                            
+                            self.logger.debug(f"   Chat Completions with '{model_name_variant}' returned {resp.status_code}: {error_msg}")
+                            
+                            # If this model name doesn't work, try next variant
+                            if resp.status_code == 400 and "does not support" not in error_msg.lower():
+                                continue  # Try next model name variant
+                            elif resp.status_code == 400 and "does not support" in error_msg.lower():
+                                # Model doesn't support chat completions at all, break and try completions
+                                break
+                    except requests.exceptions.HTTPError as e:
+                        error_msg = str(e)
+                        self.logger.debug(f"   Chat Completions HTTP error with '{model_name_variant}': {error_msg}")
+                        if "does not support" not in error_msg.lower():
+                            continue  # Try next model name variant
+                        break
+                    except Exception as e:
+                        self.logger.debug(f"   Chat Completions exception with '{model_name_variant}': {e}")
+                        continue  # Try next model name variant
+                
+                if chat_success:
+                    return  # Already returned above
                 
                 # Fallback to legacy /v1/completions API
                 # Try all model name variants
-                completions_success = False
                 for model_name_variant in model_names_to_try:
                     try:
                         self.logger.debug(f"   Trying legacy Completions API with model: {model_name_variant}")
@@ -875,18 +917,11 @@ max_batch_size: 32
                             # Last variant, re-raise
                             raise
                         continue  # Try next variant
-                except requests.exceptions.HTTPError as e:
-                    # Try to get better error message
-                    try:
-                        error_data = e.response.json()
-                        error_msg = error_data.get("error", {}).get("message", str(e))
-                    except:
-                        error_msg = str(e)
-                    
-                    self.logger.error(f"   ❌ Both Chat and Completions APIs failed")
-                    self.logger.error(f"   Model: {actual_model_name}")
-                    self.logger.error(f"   Endpoint: {endpoint}")
-                    self.logger.error(f"   Error: {error_msg}")
+                
+                # If we get here, all model name variants failed for both APIs
+                self.logger.error(f"   ❌ Both Chat and Completions APIs failed for all model name variants")
+                self.logger.error(f"   Tried model names: {model_names_to_try}")
+                self.logger.error(f"   Endpoint: {endpoint}")
                     
                     # Try to get more info about what the model supports
                     try:
