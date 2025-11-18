@@ -215,19 +215,100 @@ else
 fi
 
 # ============================================
-# STEP 10: Wait for Model Detection
+# STEP 10: Debug - Check Model Detection Setup
 # ============================================
-test_step "STEP 10: Waiting for model detection (max 60s)"
+test_step "STEP 10: Debugging model detection setup"
 
+echo ""
+echo "📋 Checking configuration..."
+if [ -f "modelium.yaml" ]; then
+    echo "Config file: modelium.yaml"
+    echo "Watch directories from config:"
+    grep -A 2 "watch_directories:" modelium.yaml | grep -v "^#" || echo "  (not found in config)"
+else
+    echo "⚠️  Config file not found!"
+fi
+
+echo ""
+echo "📁 Checking watch directories..."
+# Get watch directories from config
+WATCH_DIRS=$(grep -A 5 "watch_directories:" modelium.yaml 2>/dev/null | grep -E "^\s+-" | sed 's/.*-\s*//' | tr -d '"' || echo "")
+
+if [ -z "$WATCH_DIRS" ]; then
+    echo "  ⚠️  No watch directories found in config"
+else
+    for dir in $WATCH_DIRS; do
+        echo ""
+        echo "  Directory: $dir"
+        if [ -d "$dir" ]; then
+            echo "    ✅ EXISTS"
+            echo "    Files:"
+            ls -la "$dir" 2>/dev/null | head -10 || echo "      (empty or inaccessible)"
+            echo "    Model files:"
+            find "$dir" -name "*.safetensors" -o -name "*.bin" -o -name "*.pt" -o -name "*.pth" -o -name "config.json" 2>/dev/null | head -10 || echo "      (none found)"
+        else
+            echo "    ❌ DOES NOT EXIST"
+            echo "    Creating it..."
+            mkdir -p "$dir" 2>/dev/null && echo "    ✅ Created" || echo "    ❌ Failed to create"
+        fi
+    done
+fi
+
+echo ""
+echo "📁 Checking common model locations..."
+for dir in "/home/ec2-user/models/incoming" "/models/incoming" "./models/incoming" "$HOME/models/incoming"; do
+    if [ -d "$dir" ]; then
+        echo "  ✅ $dir exists"
+        echo "    Files: $(ls -1 "$dir" 2>/dev/null | wc -l) items"
+        if [ -f "$dir/model.safetensors" ] || [ -f "$dir/config.json" ]; then
+            echo "    ✅ Contains model files!"
+            ls -lh "$dir"/*.{safetensors,bin,pt,pth,json} 2>/dev/null | head -5
+        fi
+    fi
+done
+
+echo ""
+echo "🔍 Checking Modelium server logs for watcher status..."
+if [ -f "modelium_test.log" ]; then
+    echo "Watcher-related log entries:"
+    grep -i "watch\|discover\|scan" modelium_test.log | tail -10 || echo "  (none found)"
+fi
+
+echo ""
+echo "📊 Current model registry status:"
+curl -s http://localhost:8000/models | jq '.' 2>/dev/null || curl -s http://localhost:8000/models
+
+echo ""
+echo "💡 TIP: If your model is in /home/ec2-user/models/incoming but config watches /models/incoming:"
+echo "   Update modelium.yaml watch_directories to:"
+echo "     watch_directories:"
+echo "       - \"/home/ec2-user/models/incoming\""
+echo ""
+echo "   Or create symlink:"
+echo "     sudo mkdir -p /models && sudo ln -s /home/ec2-user/models /models/models"
+
+# ============================================
+# STEP 11: Wait for Model Detection
+# ============================================
+test_step "STEP 11: Waiting for model detection (max 60s)"
+
+MODEL_DETECTED=false
 for i in {1..12}; do
     MODELS=$(curl -s http://localhost:8000/models)
-    if echo "$MODELS" | grep -q "gpt2"; then
+    MODEL_COUNT=$(echo "$MODELS" | jq '.models | length' 2>/dev/null || echo "0")
+    
+    if [ "$MODEL_COUNT" -gt 0 ]; then
         test_success "Model detected by Modelium"
         echo "Models: $MODELS" | jq '.' 2>/dev/null || echo "$MODELS"
+        MODEL_DETECTED=true
         break
     fi
+    
     if [ $i -eq 12 ]; then
         test_fail "Model not detected after 60 seconds"
+        echo "Current registry:"
+        echo "$MODELS" | jq '.' 2>/dev/null || echo "$MODELS"
+        echo ""
         echo "Check logs:"
         tail -50 modelium_test.log
     fi
@@ -235,13 +316,21 @@ for i in {1..12}; do
 done
 
 # ============================================
-# STEP 11: Wait for Model Loading
+# STEP 12: Wait for Model Loading
 # ============================================
-test_step "STEP 11: Waiting for model to load (may take 30-120s)"
+test_step "STEP 12: Waiting for model to load (may take 30-120s)"
+
+# Get first model name if any detected
+FIRST_MODEL=$(curl -s http://localhost:8000/models | jq -r '.models[0].name' 2>/dev/null || echo "")
+if [ -z "$FIRST_MODEL" ] || [ "$FIRST_MODEL" = "null" ]; then
+    FIRST_MODEL="gpt2"  # Fallback to gpt2 for testing
+fi
+
+echo "Waiting for model: $FIRST_MODEL"
 
 for i in {1..40}; do
     MODELS=$(curl -s http://localhost:8000/models)
-    MODEL_STATUS=$(echo "$MODELS" | jq -r '.models[] | select(.name=="gpt2") | .status' 2>/dev/null || echo "")
+    MODEL_STATUS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .status" 2>/dev/null || echo "")
     
     if [ "$MODEL_STATUS" = "loaded" ]; then
         test_success "Model loaded successfully!"
@@ -268,11 +357,11 @@ for i in {1..40}; do
 done
 
 # ============================================
-# STEP 12: Test Inference
+# STEP 13: Test Inference
 # ============================================
-test_step "STEP 12: Testing inference"
+test_step "STEP 13: Testing inference"
 
-INFERENCE_RESULT=$(curl -s -X POST http://localhost:8000/predict/gpt2 \
+INFERENCE_RESULT=$(curl -s -X POST http://localhost:8000/predict/$FIRST_MODEL \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Once upon a time",
@@ -290,9 +379,9 @@ else
 fi
 
 # ============================================
-# STEP 13: Test Metrics
+# STEP 14: Test Metrics
 # ============================================
-test_step "STEP 13: Testing Prometheus metrics"
+test_step "STEP 14: Testing Prometheus metrics"
 
 METRICS=$(curl -s http://localhost:9090/metrics 2>/dev/null || echo "")
 if echo "$METRICS" | grep -q "modelium"; then
@@ -304,13 +393,13 @@ else
 fi
 
 # ============================================
-# STEP 14: Test Multiple Inferences (Load Test)
+# STEP 15: Test Multiple Inferences (Load Test)
 # ============================================
-test_step "STEP 14: Running load test (10 requests)"
+test_step "STEP 15: Running load test (10 requests)"
 
 SUCCESS_COUNT=0
 for i in {1..10}; do
-    RESULT=$(curl -s -X POST http://localhost:8000/predict/gpt2 \
+    RESULT=$(curl -s -X POST http://localhost:8000/predict/$FIRST_MODEL \
       -H "Content-Type: application/json" \
       -d "{\"prompt\": \"Test $i\", \"max_tokens\": 10}" \
       2>/dev/null)
@@ -327,13 +416,13 @@ else
 fi
 
 # ============================================
-# STEP 15: Check Orchestration
+# STEP 16: Check Orchestration
 # ============================================
-test_step "STEP 15: Checking intelligent orchestration"
+test_step "STEP 16: Checking intelligent orchestration"
 
 # Get current model stats
 MODELS=$(curl -s http://localhost:8000/models)
-QPS=$(echo "$MODELS" | jq -r '.models[] | select(.name=="gpt2") | .qps' 2>/dev/null || echo "0")
+QPS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .qps" 2>/dev/null || echo "0")
 
 echo "Current QPS: $QPS"
 if [ "$QPS" != "0" ]; then
