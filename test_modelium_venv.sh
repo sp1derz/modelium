@@ -756,21 +756,50 @@ fi
 test_step "STEP 15: Running load test (10 requests)"
 
 SUCCESS_COUNT=0
+FAILED_REQUESTS=0
 for i in {1..10}; do
+    echo "  Request $i/10..."
     RESULT=$(curl -s -X POST http://localhost:8000/predict/$FIRST_MODEL \
       -H "Content-Type: application/json" \
-      -d "{\"prompt\": \"Test $i\", \"max_tokens\": 10}" \
-      2>/dev/null)
+      -d "{
+        \"prompt\": \"Test $i: A quick brown fox\",
+        \"organizationId\": \"test-company\",
+        \"max_tokens\": 10,
+        \"temperature\": 0.7
+      }" 2>&1)
     
-    if echo "$RESULT" | grep -q "choices\|text"; then
-        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+    # Check for success indicators (same as STEP 13)
+    if echo "$RESULT" | grep -q "choices\|text\|error"; then
+        # Check if it's actually an error
+        if echo "$RESULT" | grep -q "\"error\""; then
+            echo "    ❌ Request $i failed with error"
+            FAILED_REQUESTS=$((FAILED_REQUESTS + 1))
+            echo "    Response: $RESULT" | jq '.' 2>/dev/null || echo "    $RESULT"
+        else
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+            echo "    ✅ Request $i succeeded"
+        fi
+    else
+        echo "    ❌ Request $i returned unexpected response"
+        FAILED_REQUESTS=$((FAILED_REQUESTS + 1))
+        echo "    Response: $RESULT"
     fi
+    
+    # Small delay between requests to avoid overwhelming the server
+    sleep 0.5
 done
+
+echo ""
+echo "  Results: $SUCCESS_COUNT succeeded, $FAILED_REQUESTS failed out of 10 requests"
 
 if [ $SUCCESS_COUNT -ge 8 ]; then
     test_success "Load test passed ($SUCCESS_COUNT/10 requests succeeded)"
 else
-    test_fail "Load test failed (only $SUCCESS_COUNT/10 requests succeeded)"
+    test_fail "Load test failed (only $SUCCESS_COUNT/10 requests succeeded, $FAILED_REQUESTS failed)"
+    echo ""
+    echo "  💡 Debugging info:"
+    echo "  Check modelium_test.log for detailed error messages"
+    echo "  Check if model is still loaded: curl -s http://localhost:8000/models | jq '.models[] | select(.name==\"$FIRST_MODEL\")'"
 fi
 
 # ============================================
