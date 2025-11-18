@@ -276,36 +276,52 @@ class Orchestrator:
             )
             
             # 3. LOAD: Use RuntimeManager to actually load it
-            logger.info(f"   Loading model...")
+            logger.info(f"   🚀 Starting model load...")
+            logger.info(f"   Model: {model_name}")
+            logger.info(f"   Path: {path}")
+            logger.info(f"   Runtime: {runtime}")
+            
             self.registry.update_model(model_name, status=ModelStatus.LOADING)
             
             gpu_id = self._choose_gpu()
-            success = self.runtime_manager.load_model(
-                model_name=model_name,
-                model_path=path,
-                runtime=runtime,
-                gpu_id=gpu_id
-            )
+            logger.info(f"   Selected GPU: {gpu_id}")
             
-            if success:
-                logger.info(f"   ✅ {model_name} loaded successfully!")
-                self.registry.update_model(
-                    model_name,
-                    status=ModelStatus.LOADED,
-                    target_gpu=gpu_id,
-                    loaded_at=time.time()
+            try:
+                success = self.runtime_manager.load_model(
+                    model_name=model_name,
+                    model_path=path,
+                    runtime=runtime,
+                    gpu_id=gpu_id
                 )
-                self.metrics.record_model_load(runtime, "success")
-                self.metrics.record_orchestration_decision("load", f"new_model_{runtime}")
-            else:
-                logger.error(f"   ❌ Failed to load {model_name} with {runtime}")
-                logger.error(f"   Model path: {path}")
-                logger.error(f"   GPU: {gpu_id}")
-                logger.error(f"   Check server logs above for detailed error messages")
+                
+                if success:
+                    logger.info(f"   ✅ {model_name} loaded successfully on GPU {gpu_id}!")
+                    self.registry.update_model(
+                        model_name,
+                        status=ModelStatus.LOADED,
+                        target_gpu=gpu_id,
+                        loaded_at=time.time()
+                    )
+                    self.metrics.record_model_load(runtime, "success")
+                    self.metrics.record_orchestration_decision("load", f"new_model_{runtime}")
+                else:
+                    logger.error(f"   ❌ load_model() returned False for {model_name}")
+                    logger.error(f"   Model path: {path}")
+                    logger.error(f"   Runtime: {runtime}")
+                    logger.error(f"   GPU: {gpu_id}")
+                    logger.error(f"   ⚠️  Check RuntimeManager logs above for detailed error messages")
+                    self.registry.update_model(
+                        model_name, 
+                        status=ModelStatus.ERROR,
+                        error=f"Failed to load with {runtime} (check logs)"
+                    )
+                    self.metrics.record_model_load(runtime, "error")
+            except Exception as load_error:
+                logger.error(f"   ❌ Exception during model load: {load_error}", exc_info=True)
                 self.registry.update_model(
                     model_name, 
                     status=ModelStatus.ERROR,
-                    error=f"Failed to load with {runtime}"
+                    error=f"Exception: {str(load_error)}"
                 )
                 self.metrics.record_model_load(runtime, "error")
                 
@@ -360,18 +376,30 @@ class Orchestrator:
         try:
             import torch
             if not torch.cuda.is_available():
+                logger.warning("   ⚠️  CUDA not available, using GPU 0 as fallback")
+                return 0
+            
+            gpu_count = torch.cuda.device_count()
+            logger.info(f"   🔍 Found {gpu_count} GPU(s)")
+            
+            if gpu_count == 0:
+                logger.warning("   ⚠️  No GPUs detected, using GPU 0 as fallback")
                 return 0
             
             # Simple: Choose GPU with lowest utilization
             best_gpu = 0
             min_allocated = float('inf')
             
-            for i in range(torch.cuda.device_count()):
+            for i in range(gpu_count):
                 allocated = torch.cuda.memory_allocated(i)
+                reserved = torch.cuda.memory_reserved(i)
+                logger.debug(f"   GPU {i}: {allocated / 1e9:.2f}GB allocated, {reserved / 1e9:.2f}GB reserved")
                 if allocated < min_allocated:
                     min_allocated = allocated
                     best_gpu = i
             
+            logger.info(f"   ✅ Selected GPU {best_gpu} (lowest utilization: {min_allocated / 1e9:.2f}GB)")
             return best_gpu
-        except:
+        except Exception as e:
+            logger.warning(f"   ⚠️  Error choosing GPU: {e}, using GPU 0 as fallback")
             return 0
