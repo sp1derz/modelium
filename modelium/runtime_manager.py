@@ -773,15 +773,52 @@ max_batch_size: 32
                         self.logger.error(f"Traceback: {traceback.format_exc()}")
                         raise
                 
-                def __call__(self, request: dict):
+                def __call__(self, request):
                     import torch
                     
-                    prompt = request.get("prompt", "")
-                    max_tokens = request.get("max_tokens", 100)
-                    temperature = request.get("temperature", 0.7)
+                    # Ray Serve can pass request as dict or Starlette Request object
+                    # Handle both cases
+                    if hasattr(request, "json"):  # Starlette Request object
+                        # For sync deployments, Ray Serve should pass dict, but handle Request object
+                        try:
+                            # Try to get JSON body
+                            if hasattr(request, "_json"):
+                                request_dict = request._json
+                            elif hasattr(request, "json"):
+                                # If it's a coroutine, we can't await it in sync context
+                                # Ray Serve should handle this, but let's try to get it
+                                import json
+                                if hasattr(request, "body"):
+                                    request_dict = json.loads(request.body.decode())
+                                else:
+                                    request_dict = {}
+                            else:
+                                request_dict = {}
+                        except:
+                            request_dict = {}
+                    elif isinstance(request, dict):
+                        request_dict = request
+                    else:
+                        # Try to convert to dict
+                        try:
+                            request_dict = dict(request) if hasattr(request, "__iter__") and not isinstance(request, str) else {}
+                        except:
+                            request_dict = {}
+                    
+                    prompt = request_dict.get("prompt", "") if isinstance(request_dict, dict) else ""
+                    max_tokens = request_dict.get("max_tokens", 100) if isinstance(request_dict, dict) else 100
+                    temperature = request_dict.get("temperature", 0.7) if isinstance(request_dict, dict) else 0.7
+                    
+                    self.logger.debug(f"Received request type: {type(request)}")
+                    self.logger.debug(f"Request dict type: {type(request_dict)}")
+                    self.logger.debug(f"Request dict keys: {list(request_dict.keys()) if isinstance(request_dict, dict) else 'not a dict'}")
+                    self.logger.debug(f"Prompt: {prompt[:50] if prompt else 'None'}..., max_tokens={max_tokens}, temp={temperature}")
                     
                     if not prompt:
-                        return {"error": "Prompt is required"}
+                        self.logger.error(f"Prompt is required but not found in request")
+                        self.logger.error(f"Request type: {type(request)}")
+                        self.logger.error(f"Request dict: {request_dict}")
+                        return {"error": "Prompt is required", "received_keys": list(request_dict.keys()) if isinstance(request_dict, dict) else [], "request_type": str(type(request))}
                     
                     try:
                         # Tokenize input
