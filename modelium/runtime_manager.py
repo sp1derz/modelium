@@ -156,16 +156,40 @@ class RuntimeManager:
                 return False
             
             # Check for Python development headers (required for CUDA compilation)
+            # Note: vLLM will compile CUDA code, so we need Python headers
             try:
                 import sysconfig
-                include_dir = sysconfig.get_path('include')
-                python_h = Path(include_dir) / "Python.h"
-                if not python_h.exists():
-                    self.logger.error(f"   ❌ Python development headers not found!")
-                    self.logger.error(f"   Missing: {python_h}")
-                    self.logger.error(f"   Install: sudo yum install python3-devel  # Amazon Linux")
-                    self.logger.error(f"   Or: sudo apt-get install python3-dev      # Ubuntu/Debian")
-                    return False
+                import sys
+                import os
+                
+                # Get Python version (e.g., "3.11")
+                py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+                
+                # Check multiple possible locations
+                possible_paths = [
+                    sysconfig.get_path('include'),  # Standard location
+                    f"/usr/include/python{py_version}",  # System location
+                    f"/usr/include/python{py_version}m",  # Some distros add 'm'
+                    f"/usr/local/include/python{py_version}",  # Local install
+                ]
+                
+                python_h_found = False
+                for include_dir in possible_paths:
+                    if include_dir:
+                        python_h = Path(include_dir) / "Python.h"
+                        if python_h.exists():
+                            python_h_found = True
+                            self.logger.debug(f"   ✅ Found Python.h at {python_h}")
+                            break
+                
+                if not python_h_found:
+                    self.logger.warning(f"   ⚠️  Python development headers not found in standard locations")
+                    self.logger.warning(f"   Python version: {py_version}")
+                    self.logger.warning(f"   Checked: {', '.join(str(p) for p in possible_paths if p)}")
+                    self.logger.warning(f"   vLLM may fail to compile CUDA code without headers")
+                    self.logger.warning(f"   Install: sudo yum install python{py_version.split('.')[0]}-devel  # Amazon Linux")
+                    self.logger.warning(f"   Or: sudo apt-get install python{py_version.split('.')[0]}-dev  # Ubuntu/Debian")
+                    # Don't return False - let vLLM try anyway, it might work
             except Exception as e:
                 self.logger.warning(f"   ⚠️  Could not check for Python headers: {e}")
                 # Continue anyway - might work
