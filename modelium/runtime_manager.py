@@ -892,6 +892,13 @@ max_batch_size: 32
                             result = resp.json()
                             self.logger.debug(f"   Chat Completions response: {result}")
                             
+                            # CRITICAL: vLLM can return 200 with an error object!
+                            if "error" in result:
+                                error_msg = result.get("error", {}).get("message", "Unknown error") if isinstance(result.get("error"), dict) else str(result.get("error"))
+                                self.logger.warning(f"   ⚠️  Chat Completions returned 200 but with error: {error_msg}")
+                                # Try next variant or fallback
+                                continue
+                            
                             # Extract text from chat format
                             if "choices" in result and len(result["choices"]) > 0:
                                 content = result["choices"][0].get("message", {}).get("content", "")
@@ -965,8 +972,33 @@ max_batch_size: 32
                         )
                         
                         if resp.status_code == 200:
-                            self.logger.debug(f"   ✅ Legacy Completions API succeeded with model: {model_name_variant}")
-                            return resp.json()
+                            result = resp.json()
+                            self.logger.debug(f"   Completions API response: {result}")
+                            
+                            # CRITICAL: vLLM can return 200 with an error object!
+                            if "error" in result:
+                                error_msg = result.get("error", {}).get("message", "Unknown error") if isinstance(result.get("error"), dict) else str(result.get("error"))
+                                self.logger.warning(f"   ⚠️  Completions API returned 200 but with error: {error_msg}")
+                                # Try next variant
+                                continue
+                            
+                            # Check for choices/text in response
+                            if "choices" in result and len(result["choices"]) > 0:
+                                self.logger.info(f"   ✅ Legacy Completions API succeeded with model: {model_name_variant}")
+                                return result
+                            elif "text" in result:
+                                self.logger.info(f"   ✅ Legacy Completions API succeeded with model: {model_name_variant}")
+                                return result
+                            else:
+                                self.logger.warning(f"   ⚠️  Completions API returned 200 but no choices/text in response")
+                                if isinstance(result, dict):
+                                    import builtins
+                                    result_keys = builtins.list(result.keys())
+                                    self.logger.debug(f"   Response keys: {result_keys}")
+                                else:
+                                    self.logger.debug(f"   Response is not a dict: {type(result)}")
+                                # Try next variant
+                                continue
                         else:
                             # Read error message
                             try:
@@ -1028,13 +1060,20 @@ max_batch_size: 32
                 except:
                     pass
                 
-                # Return error in a format the API can handle
+                # Return detailed error
+                error_detail = f"vLLM inference failed: Model '{actual_model_name}' does not support Completions or Chat Completions API"
+                self.logger.error(f"   ❌ {error_detail}")
+                self.logger.error(f"   💡 Suggestion: GPT-2 may not be fully supported in vLLM 0.11+")
+                self.logger.error(f"   💡 Alternative: Try using Ray Serve for GPT-2 models")
+                self.logger.error(f"   💡 Check vLLM logs at /tmp/modelium_vllm_logs/ for details")
+                
                 return {
-                    "error": f"vLLM inference failed: Model does not support Completions or Chat Completions API",
+                    "error": error_detail,
                     "model": actual_model_name,
                     "tried_names": model_names_to_try,
                     "endpoint": endpoint,
-                    "suggestion": "Check vLLM logs at /tmp/modelium_vllm_logs/ for details. GPT-2 may require special handling in vLLM 0.11+"
+                    "suggestion": "GPT-2 may not be fully supported in vLLM. Consider using Ray Serve for GPT-2 models, or try a different model like GPT-2-medium or GPT-2-large.",
+                    "vllm_logs": "/tmp/modelium_vllm_logs/"
                 }
             
             elif runtime == "triton":
