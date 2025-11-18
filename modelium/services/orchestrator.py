@@ -126,6 +126,29 @@ class Orchestrator:
             idle_seconds = self.metrics.get_model_idle_seconds(model.name, model.runtime)
             qps = self.metrics.get_model_qps(model.name, model.runtime)
             
+            # GRACE PERIOD: Don't unload models that were just loaded (within 60 seconds)
+            # This prevents immediately unloading models that just finished loading
+            if model.loaded_at:
+                time_since_load = time.time() - model.loaded_at
+                grace_period = 120  # 60 seconds grace period after loading
+                if time_since_load < grace_period:
+                    logger.debug(
+                        f"✅ Keeping {model.name}: grace period "
+                        f"({time_since_load:.0f}s since load, {grace_period}s grace period)"
+                    )
+                    continue
+            
+            # Fix idle_seconds if it's infinity (model never had a request)
+            # Use time since load if available, otherwise use a reasonable default
+            if idle_seconds == float('inf'):
+                if model.loaded_at:
+                    idle_seconds = time.time() - model.loaded_at
+                    logger.debug(f"   {model.name}: No requests yet, using time since load: {idle_seconds:.0f}s")
+                else:
+                    # Fallback: assume it was just loaded
+                    idle_seconds = 0
+                    logger.debug(f"   {model.name}: No requests and no loaded_at, assuming just loaded")
+            
             # RULE 1: Never unload always_loaded models
             if model.name in always_loaded:
                 logger.debug(f"✅ Keeping {model.name}: always_loaded policy")
