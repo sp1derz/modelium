@@ -231,27 +231,80 @@ fi
 
 echo ""
 echo "📁 Checking watch directories..."
-# Get watch directories from config
-WATCH_DIRS=$(grep -A 5 "watch_directories:" modelium.yaml 2>/dev/null | grep -E "^\s+-" | sed 's/.*-\s*//' | tr -d '"' || echo "")
+# Get watch directories from config using Python (handles paths correctly)
+python3 << 'PYEOF'
+import yaml
+import os
 
-if [ -z "$WATCH_DIRS" ]; then
-    echo "  ⚠️  No watch directories found in config"
+try:
+    with open('modelium.yaml', 'r') as f:
+        config = yaml.safe_load(f) or {}
+    
+    dirs = config.get('orchestration', {}).get('model_discovery', {}).get('watch_directories', [])
+    
+    if not dirs:
+        print("  ⚠️  No watch directories found in config")
+    else:
+        for dir_path in dirs:
+            print(f"\n  Directory: {dir_path}")
+            if os.path.isdir(dir_path):
+                print("    ✅ EXISTS")
+                print("    Files:")
+                try:
+                    files = os.listdir(dir_path)
+                    for f in files[:10]:
+                        print(f"      {f}")
+                    if len(files) > 10:
+                        print(f"      ... and {len(files) - 10} more")
+                except Exception as e:
+                    print(f"      (error listing: {e})")
+                
+                print("    Model files:")
+                model_files = []
+                for root, _, files in os.walk(dir_path):
+                    for f in files:
+                        if any(f.endswith(ext) for ext in ['.safetensors', '.bin', '.pt', '.pth']) or f == 'config.json':
+                            model_files.append(os.path.join(root, f))
+                            if len(model_files) >= 10:
+                                break
+                    if len(model_files) >= 10:
+                        break
+                
+                if model_files:
+                    for f in model_files[:10]:
+                        size = os.path.getsize(f) / (1024*1024)
+                        print(f"      {f} ({size:.1f}MB)")
+                else:
+                    print("      (none found)")
+            else:
+                print("    ❌ DOES NOT EXIST")
+                print("    Creating it...")
+                try:
+                    os.makedirs(dir_path, exist_ok=True)
+                    print("    ✅ Created")
+                except Exception as e:
+                    print(f"    ❌ Failed to create: {e}")
+except Exception as e:
+    print(f"  ⚠️  Error reading config: {e}")
+PYEOF
+
+# Get first watch directory for later use
+WATCHED_DIR=$(python3 -c "
+import yaml
+try:
+    with open('modelium.yaml', 'r') as f:
+        config = yaml.safe_load(f) or {}
+    dirs = config.get('orchestration', {}).get('model_discovery', {}).get('watch_directories', [])
+    print(dirs[0] if dirs else '')
+except:
+    print('')
+" 2>/dev/null || echo "")
+
+if [ -z "$WATCHED_DIR" ]; then
+    echo "  ⚠️  Could not determine watched directory"
 else
-    for dir in $WATCH_DIRS; do
-        echo ""
-        echo "  Directory: $dir"
-        if [ -d "$dir" ]; then
-            echo "    ✅ EXISTS"
-            echo "    Files:"
-            ls -la "$dir" 2>/dev/null | head -10 || echo "      (empty or inaccessible)"
-            echo "    Model files:"
-            find "$dir" -name "*.safetensors" -o -name "*.bin" -o -name "*.pt" -o -name "*.pth" -o -name "config.json" 2>/dev/null | head -10 || echo "      (none found)"
-        else
-            echo "    ❌ DOES NOT EXIST"
-            echo "    Creating it..."
-            mkdir -p "$dir" 2>/dev/null && echo "    ✅ Created" || echo "    ❌ Failed to create"
-        fi
-    done
+    echo ""
+    echo "  Primary watch directory: $WATCHED_DIR"
 fi
 
 echo ""

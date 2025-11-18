@@ -148,13 +148,17 @@ class ModelWatcher:
             descriptor = self.analyzer.analyze(path, model_name=model_name)
             
             # Update registry with analysis results
+            parameters = 0
+            if descriptor and descriptor.resources:
+                parameters = descriptor.resources.parameters
+            
             self.registry.update_model(
                 model_name,
                 status=ModelStatus.UNLOADED,
                 framework=framework.value if framework else "unknown",
                 model_type=descriptor.model_type.value if descriptor and descriptor.model_type else "unknown",
                 size_bytes=os.path.getsize(path),
-                parameters=descriptor.total_parameters if descriptor else 0,
+                parameters=parameters,
             )
             
             logger.info(f"   ✅ Analysis complete: {model_name}")
