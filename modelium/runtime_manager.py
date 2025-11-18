@@ -952,23 +952,66 @@ max_batch_size: 32
         while time.time() - start < timeout:
             check_count += 1
             try:
-                # Try to hit the endpoint
-                resp = requests.get(endpoint, timeout=2)
-                if resp.status_code in [200, 404]:  # 404 is OK, means endpoint exists
+                # Try to hit the endpoint with a simple POST request (not GET)
+                # Ray Serve endpoints expect POST for inference
+                resp = requests.post(
+                    endpoint,
+                    json={"prompt": "test", "max_tokens": 1},
+                    timeout=5
+                )
+                if resp.status_code == 200:
                     elapsed = time.time() - start
-                    self.logger.info(f"   ✅ Ray Serve ready after {elapsed:.1f}s")
+                    self.logger.info(f"   ✅ Ray Serve ready after {elapsed:.1f}s (endpoint responds)")
                     return True
+                elif resp.status_code == 404:
+                    # Endpoint doesn't exist yet
+                    if check_count % 10 == 0:
+                        elapsed = time.time() - start
+                        self.logger.debug(f"   Ray Serve endpoint not found yet ({elapsed:.0f}s elapsed)...")
+                else:
+                    # Other status codes might mean it's starting but not ready
+                    if check_count % 10 == 0:
+                        elapsed = time.time() - start
+                        self.logger.debug(f"   Ray Serve returned {resp.status_code} ({elapsed:.0f}s elapsed)...")
             except requests.exceptions.ConnectionError:
                 # Connection refused is normal while starting
                 if check_count % 10 == 0:  # Log every 20 seconds
                     elapsed = time.time() - start
                     self.logger.debug(f"   Ray Serve not ready yet ({elapsed:.0f}s elapsed)...")
+            except requests.exceptions.Timeout:
+                # Timeout might mean model is still loading
+                if check_count % 10 == 0:
+                    elapsed = time.time() - start
+                    self.logger.debug(f"   Ray Serve request timed out ({elapsed:.0f}s elapsed, model may still be loading)...")
             except Exception as e:
                 # Other errors might mean it's starting
                 if check_count % 10 == 0:
                     self.logger.debug(f"   Ray Serve check error (normal during startup): {e}")
             
             time.sleep(2)
+        
+        # Check if deployment exists even if endpoint doesn't respond
+        try:
+            from ray import serve
+            deployments = serve.list_deployments()
+            model_name = endpoint.split("/")[-1]  # Extract model name from endpoint
+            if model_name in deployments:
+                self.logger.warning(f"   ⚠️  Deployment '{model_name}' exists but endpoint not responding")
+                self.logger.warning(f"   💡 Model may have failed to load inside Ray actor (check Ray logs)")
+                # Try one more time with longer timeout
+                try:
+                    resp = requests.post(
+                        endpoint,
+                        json={"prompt": "test", "max_tokens": 1},
+                        timeout=30
+                    )
+                    if resp.status_code == 200:
+                        self.logger.info(f"   ✅ Ray Serve ready after extended wait")
+                        return True
+                except:
+                    pass
+        except:
+            pass
         
         self.logger.error(f"   ❌ Ray Serve not ready after {timeout}s")
         return False
