@@ -122,8 +122,17 @@ class Orchestrator:
         idle_threshold = policies.evict_after_idle_seconds
         always_loaded = policies.always_loaded
         
-        # Try to use Brain (Qwen LLM) for intelligent decisions
-        if self.brain is not None and self.brain.model is not None:
+        # Use Brain (Qwen LLM) for intelligent decisions - MANDATORY
+        if self.brain is None:
+            logger.error("❌ FATAL: Brain is None! Orchestration cannot proceed.")
+            raise RuntimeError("Brain is required but not initialized")
+        
+        if self.brain.model is None:
+            logger.error("❌ FATAL: Brain model is None! Orchestration cannot proceed.")
+            raise RuntimeError("Brain model is required but not loaded")
+        
+        # Brain is available - use it
+        try:
             try:
                 logger.debug("🧠 Using Brain (Qwen) for orchestration decision...")
                 
@@ -179,14 +188,19 @@ class Orchestrator:
                     
                     # Brain made decisions, return early
                     return
+                else:
+                    logger.warning(f"🧠 Brain returned invalid decision (no actions), using rules")
                     
             except Exception as e:
-                logger.warning(f"🧠 Brain decision failed: {e}, falling back to rules")
-                if not self.brain.fallback_to_rules:
-                    raise
+                logger.error(f"❌ Brain decision failed: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                # Brain is mandatory - don't fallback, raise error
+                raise RuntimeError(f"Brain orchestration failed: {e}")
         
-        # FALLBACK: Rule-based logic (used if brain unavailable or failed)
-        logger.debug("📊 Using rule-based orchestration (brain not available or failed)")
+        # This should never be reached if brain is working
+        logger.error("❌ Brain decision returned no actions - this should not happen")
+        raise RuntimeError("Brain decision returned no actions")
         
         # INTELLIGENT DECISIONS for each model
         for model in loaded_models:

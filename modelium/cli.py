@@ -49,26 +49,83 @@ def serve(
         console.print(f"   GPUs: {cfg.gpu.count or 'auto-detect'}")
         console.print()
         
-        # Initialize brain if enabled
-        if cfg.modelium_brain.enabled:
-            console.print("🧠 Loading Modelium Brain...")
-            try:
-                brain = ModeliumBrain(
-                    model_name=cfg.modelium_brain.model_name,
-                    device=cfg.modelium_brain.device,
-                    dtype=cfg.modelium_brain.dtype,
-                    fallback_to_rules=cfg.modelium_brain.fallback_to_rules,
-                )
-                console.print("   ✅ Brain loaded successfully")
-            except Exception as e:
-                if cfg.modelium_brain.fallback_to_rules:
-                    console.print(f"   ⚠️  Brain load failed: {e}")
-                    console.print("   ✅ Using rule-based mode (fallback)")
+        # Initialize brain - MANDATORY, not optional
+        if not cfg.modelium_brain.enabled:
+            console.print("\n[red]❌ FATAL: Brain must be enabled![/red]")
+            console.print("\nModelium requires the Brain (Qwen) to make intelligent decisions.")
+            console.print("Set modelium_brain.enabled: true in modelium.yaml")
+            raise typer.Exit(1)
+        
+        console.print("🧠 Loading Modelium Brain (MANDATORY)...")
+        brain = None
+        try:
+            brain = ModeliumBrain(
+                model_name=cfg.modelium_brain.model_name,
+                device=cfg.modelium_brain.device,
+                dtype=cfg.modelium_brain.dtype,
+                fallback_to_rules=False,  # No fallback - brain must work
+            )
+            
+            # Verify brain is actually loaded
+            if brain.model is None or brain.tokenizer is None:
+                console.print("\n[red]❌ FATAL: Brain model failed to load![/red]")
+                console.print("   Model: None")
+                console.print("   Tokenizer: None")
+                raise RuntimeError("Brain model is None")
+            
+            # Verify brain is on the correct device
+            if hasattr(brain.model, 'device'):
+                brain_device = str(brain.model.device)
+                console.print(f"   ✅ Brain loaded on device: {brain_device}")
+            else:
+                # Check first parameter's device
+                first_param = next(brain.model.parameters(), None)
+                if first_param is not None:
+                    brain_device = str(first_param.device)
+                    console.print(f"   ✅ Brain loaded on device: {brain_device}")
                 else:
-                    console.print(f"   ❌ Brain load failed: {e}")
-                    raise typer.Exit(1)
-        else:
-            console.print("📊 Brain disabled, using rule-based mode")
+                    console.print("   ⚠️  Could not verify brain device")
+            
+            # Get model size
+            param_count = sum(p.numel() for p in brain.model.parameters())
+            size_gb = param_count * 2 / 1e9  # FP16 = 2 bytes per param
+            console.print(f"   ✅ Brain model: {param_count/1e9:.1f}B parameters, ~{size_gb:.1f}GB VRAM")
+            
+            # Test brain with a simple call to ensure it works
+            console.print("   🧪 Testing brain inference...")
+            try:
+                test_result = brain._generate(
+                    system_prompt="You are a helpful assistant.",
+                    user_prompt="Say 'OK' if you are working.",
+                    max_tokens=10,
+                    temperature=0.1,
+                )
+                if test_result and len(test_result) > 0:
+                    console.print(f"   ✅ Brain test successful: {test_result[:50]}...")
+                else:
+                    raise RuntimeError("Brain test returned empty result")
+            except Exception as test_error:
+                console.print(f"\n[red]❌ FATAL: Brain inference test failed![/red]")
+                console.print(f"   Error: {test_error}")
+                raise
+            
+            console.print("   ✅ Brain loaded and verified successfully")
+            
+        except Exception as e:
+            console.print(f"\n[red]❌ FATAL: Brain load failed![/red]")
+            console.print(f"   Error: {e}")
+            console.print("\n   Modelium cannot run without the Brain.")
+            console.print("   The Brain (Qwen) is required for intelligent orchestration.")
+            console.print("\n   Troubleshooting:")
+            console.print("   1. Check GPU availability: nvidia-smi")
+            console.print("   2. Check CUDA installation")
+            console.print("   3. Check HuggingFace access (model downloads)")
+            console.print("   4. Check disk space for model cache")
+            console.print("   5. Check modelium.yaml: modelium_brain.model_name")
+            import traceback
+            console.print(f"\n   Full traceback:")
+            console.print(traceback.format_exc())
+            raise typer.Exit(1)
         
         console.print()
         console.print("🚀 Server starting...")

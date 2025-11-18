@@ -107,6 +107,16 @@ class ModeliumBrain:
             
             logger.info(f"   ✅ Brain loaded: {param_count/1e9:.1f}B params, {size_gb:.1f}GB VRAM")
             
+            # Verify model is actually on the requested device
+            if self.device.startswith("cuda"):
+                first_param = next(self.model.parameters(), None)
+                if first_param is not None:
+                    actual_device = str(first_param.device)
+                    if not actual_device.startswith("cuda"):
+                        logger.warning(f"   ⚠️  Brain requested {self.device} but loaded on {actual_device}")
+                    else:
+                        logger.info(f"   ✅ Brain verified on {actual_device}")
+            
         except Exception as e:
             logger.error(f"   ❌ Failed to load brain: {e}")
             if not self.fallback_to_rules:
