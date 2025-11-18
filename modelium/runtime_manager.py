@@ -905,7 +905,12 @@ max_batch_size: 32
                             else:
                                 # Response is 200 but no choices - log and try next variant or fallback
                                 self.logger.warning(f"   ⚠️  Chat Completions returned 200 but no choices in response")
-                                self.logger.debug(f"   Response keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
+                                if isinstance(result, dict):
+                                    import builtins
+                                    result_keys = builtins.list(result.keys())
+                                    self.logger.debug(f"   Response keys: {result_keys}")
+                                else:
+                                    self.logger.debug(f"   Response is not a dict: {type(result)}")
                                 self.logger.debug(f"   Full response: {result}")
                                 # Don't break - try next model name variant or fallback to completions
                                 continue
