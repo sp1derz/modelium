@@ -93,15 +93,15 @@ Given the current state (loaded models, GPU memory, traffic patterns, pending re
 
 **Decision Guidelines**:
 - **Keep** models with:
-  - High QPS (>0.1 req/s indicates active traffic)
+  - High QPM (>6 req/min, or QPS >0.1) indicates active traffic
   - Always-loaded policy (SLA requirements)
   - Recent activity (<5min idle)
   - Pending requests in queue
   - Recent requests (idle <30s)
   
 - **Evict** models with:
-  - Long idle time (>5min) AND no pending requests AND QPS = 0.0
-  - Zero QPS (0.0) AND idle >5min (truly inactive)
+  - Long idle time (>5min) AND no pending requests AND QPM = 0.0 (QPS = 0.0)
+  - Zero QPM (0.0) AND idle >5min (truly inactive)
   - Low priority when space needed
   - No requests in last 5+ minutes
   
@@ -174,10 +174,12 @@ def format_orchestration_prompt(
 - NEVER evict models with QPS > 0.0 (active traffic)
 - ONLY evict if: QPS = 0.0 AND idle >= 180s (3 minutes) AND time_since_load >= 120s (grace period passed)
 
-**QPS INTERPRETATION**:
-- QPS = 0.0 means NO active traffic (model is idle)
-- QPS > 0.1 means active traffic (keep the model)
-- QPS > 0.0 = active (keep, even if idle <5min)
+**QPS/QPM INTERPRETATION**:
+- QPM (queries per minute) is more stable than QPS for decisions
+- QPM = 0.0 (QPS = 0.0) means NO active traffic (model is idle)
+- QPM > 6.0 (QPS > 0.1) means active traffic (keep the model)
+- QPM > 0.0 (QPS > 0.0) = active (keep, even if idle <5min)
+- QPS decays quickly (1 second), QPM is more stable (60 second window)
 
 **EVICTION ELIGIBILITY** (check can_evict field):
 - can_evict=true: Model is eligible for eviction (QPS=0 AND idle>=180s AND grace period passed)

@@ -54,7 +54,13 @@ class ModeliumMetrics:
         # Model metrics
         self.model_qps = Gauge(
             'modelium_model_qps',
-            'Queries per second for each model',
+            'Queries per second for each model (real-time, volatile)',
+            ['model', 'runtime', 'gpu']
+        )
+        
+        self.model_qpm = Gauge(
+            'modelium_model_qpm',
+            'Queries per minute for each model (stable, for orchestration)',
             ['model', 'runtime', 'gpu']
         )
         
@@ -108,10 +114,12 @@ class ModeliumMetrics:
             ['action', 'reason']
         )
         
-        # Model state tracking (for QPS calculation)
+        # Model state tracking (for QPS/QPM calculation)
         self._model_request_counts: Dict[str, int] = {}
         self._model_last_request: Dict[str, float] = {}
         self._last_qps_update: Dict[str, float] = {}
+        self._last_qpm_update: Dict[str, float] = {}  # Separate window for QPM (60 seconds)
+        self._model_qpm_counts: Dict[str, int] = {}  # Separate counter for QPM
         self._model_gpu_map: Dict[str, Optional[int]] = {}  # Track GPU for each model
         
         # Background thread to decay QPS when no requests
@@ -368,6 +376,58 @@ class ModeliumMetrics:
     def update_models_loaded_count(self, runtime: str, count: int):
         """Update count of loaded models for a runtime."""
         self.models_loaded.labels(runtime=runtime).set(count)
+    
+    def get_model_qpm(self, model: str, runtime: str, gpu: Optional[int] = None) -> float:
+        """
+        Get current QPM (queries per minute) for a model.
+        
+        QPM is more stable than QPS for orchestration decisions.
+        Uses a 60-second sliding window.
+        
+        Args:
+            model: Model name
+            runtime: Runtime name (ray, vllm, triton)
+            gpu: Optional GPU ID where the model is loaded.
+        
+        Returns:
+            Queries per minute (float)
+        """
+        model_key = f"{model}:{runtime}"
+        now = time.time()
+        
+        # Try to read from Prometheus gauge first
+        if gpu is not None:
+            gpu_label = str(gpu)
+            try:
+                gauge_value = self.model_qpm.labels(
+                    model=model,
+                    runtime=runtime,
+                    gpu=gpu_label
+                )._value.get()
+                
+                if gauge_value is not None and gauge_value >= 0:
+                    self.logger.debug(f"📊 QPM: Read from Prometheus gauge for {model_key} (gpu={gpu_label}): {gauge_value:.2f}")
+                    return float(gauge_value)
+            except Exception:
+                pass
+        
+        # Fallback: Calculate from QPM counter
+        count = self._model_qpm_counts.get(model_key, 0)
+        last_update = self._last_qpm_update.get(model_key, now)
+        elapsed = now - last_update
+        
+        if count > 0 and elapsed > 0:
+            if elapsed < 60.0:
+                # Calculate QPM over the elapsed time
+                qpm = (count / elapsed) * 60.0  # Convert to per-minute
+                self.logger.debug(f"📊 QPM: Calculated from counter for {model_key}: {qpm:.2f} (count={count}, elapsed={elapsed:.2f}s)")
+                return qpm
+            else:
+                # Window expired, calculate average over 60s
+                qpm = count / 1.0  # Average over 1 minute
+                return qpm
+        
+        return 0.0
     
     def get_model_qps(self, model: str, runtime: str, gpu: Optional[int] = None) -> float:
         """

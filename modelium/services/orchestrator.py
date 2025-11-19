@@ -143,10 +143,12 @@ class Orchestrator:
         models_data = []
         for m in loaded_models:
             # Get relevant metrics from Prometheus
-            # Pass GPU ID to ensure we get QPS for the specific model on its specific GPU
+            # Pass GPU ID to ensure we get QPM for the specific model on its specific GPU
             # This is critical when multiple models are on different GPUs
+            # Use QPM (queries per minute) instead of QPS for more stable orchestration decisions
             model_gpu = m.target_gpu if hasattr(m, 'target_gpu') and m.target_gpu is not None else None
-            qps = self.metrics.get_model_qps(m.name, m.runtime, gpu=model_gpu)
+            qpm = self.metrics.get_model_qpm(m.name, m.runtime, gpu=model_gpu)
+            qps = qpm / 60.0  # Convert QPM to QPS for display/compatibility
             idle_seconds = self.metrics.get_model_idle_seconds(m.name, m.runtime)
             
             # Calculate time since load
@@ -174,7 +176,8 @@ class Orchestrator:
                 "name": m.name,
                 "runtime": m.runtime,
                 "gpu": m.target_gpu if hasattr(m, 'target_gpu') else None,
-                "qps": qps,  # From Prometheus: modelium_model_qps
+                "qps": qps,  # Converted from QPM (qpm/60.0) for display
+                "qpm": qpm,  # From Prometheus: modelium_model_qpm (stable, for orchestration)
                 "idle_seconds": idle_seconds,  # From Prometheus: modelium_model_idle_seconds
                 "loaded_at": m.loaded_at,
                 "time_since_load_seconds": time_since_load,
@@ -207,7 +210,7 @@ class Orchestrator:
         logger.info("📤 Sending to Brain (Qwen):")
         logger.info(f"   Models: {len(models_data)} loaded")
         for m in models_data:
-            logger.info(f"      - {m['name']}: QPS={m['qps']:.2f}, idle={m['idle_seconds']:.1f}s, GPU={m['gpu']}, since_load={m.get('time_since_load_seconds', 0):.1f}s")
+            logger.info(f"      - {m['name']}: QPM={m.get('qpm', 0):.2f} (QPS={m['qps']:.2f}), idle={m['idle_seconds']:.1f}s, GPU={m['gpu']}, since_load={m.get('time_since_load_seconds', 0):.1f}s")
         logger.info(f"   GPU memory pressure: {gpu_memory_pressure}")
         logger.info(f"   Policies: evict_after_idle={idle_threshold}s, always_loaded={always_loaded}")
         
