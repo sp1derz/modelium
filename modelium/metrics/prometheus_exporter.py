@@ -6,6 +6,7 @@ Collects and exposes metrics for Modelium's orchestration decisions.
 
 import logging
 import time
+import threading
 from typing import Dict, List, Optional
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
@@ -162,6 +163,10 @@ class ModeliumMetrics:
         # Update request tracking for QPS calculation
         model_key = f"{model}:{runtime}"
         now = time.time()
+        
+        # Store GPU mapping for this model (for QPS decay thread)
+        if gpu is not None:
+            self._model_gpu_map[model_key] = gpu
         
         # Increment request counter
         old_count = self._model_request_counts.get(model_key, 0)
