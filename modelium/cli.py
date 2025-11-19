@@ -307,12 +307,12 @@ def serve(
                 model_qps = 0.0
                 model_idle = 0.0
                 
-               if m.runtime:
-                   try:
-                       # Pass GPU ID to ensure accurate QPS per model on its specific GPU
-                       model_gpu = m.target_gpu if hasattr(m, 'target_gpu') and m.target_gpu is not None else None
-                       model_qps = metrics.get_model_qps(m.name, m.runtime, gpu=model_gpu)
-                       model_idle = metrics.get_model_idle_seconds(m.name, m.runtime)
+                if m.runtime:
+                    try:
+                        # Pass GPU ID to ensure accurate QPS per model on its specific GPU
+                        model_gpu = m.target_gpu if hasattr(m, 'target_gpu') and m.target_gpu is not None else None
+                        model_qps = metrics.get_model_qps(m.name, m.runtime, gpu=model_gpu)
+                        model_idle = metrics.get_model_idle_seconds(m.name, m.runtime)
                         # Handle infinity for idle_seconds
                         if model_idle == float('inf'):
                             model_idle = 0.0
