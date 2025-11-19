@@ -196,21 +196,39 @@ class ModeliumMetrics:
             # Calculate QPS over the elapsed time
             qps = count / elapsed if elapsed > 0 else 0.0
             
+            # Log before updating gauge
+            gpu_label = str(gpu) if gpu is not None else "unknown"
+            self.logger.info(f"📊 QPS: Updating gauge for {model_key}: count={count}, elapsed={elapsed:.2f}s, qps={qps:.2f}, gpu={gpu_label}")
+            
             # Update Prometheus gauge
             self.model_qps.labels(
                 model=model,
                 runtime=runtime,
-                gpu=str(gpu) if gpu is not None else "unknown"
+                gpu=gpu_label
             ).set(qps)
+            
+            # Verify gauge was updated
+            try:
+                verify_value = self.model_qps.labels(
+                    model=model,
+                    runtime=runtime,
+                    gpu=gpu_label
+                )._value.get()
+                self.logger.info(f"📊 QPS: Gauge updated successfully for {model_key}: {verify_value:.2f}")
+            except Exception as e:
+                self.logger.error(f"📊 QPS: Failed to verify gauge update for {model_key}: {e}")
             
             # Only reset counter and update timestamp if window expired (10 seconds)
             # This allows get_model_qps() to see recent requests in the current window
             if elapsed >= 10.0:
                 # Window expired - reset for next window
+                self.logger.info(f"📊 QPS: Window expired for {model_key} (elapsed={elapsed:.2f}s >= 10.0s), resetting counter")
                 self._model_request_counts[model_key] = 0
                 self._last_qps_update[model_key] = now
             # If window not expired, DON'T update _last_qps_update
             # This allows get_model_qps() to calculate from the start of the window
+        else:
+            self.logger.warning(f"📊 QPS: Cannot update gauge for {model_key} (elapsed={elapsed:.2f}s <= 0)")
     
     def update_model_idle_time(self, model: str, runtime: str):
         """Update idle time for a model."""
@@ -291,25 +309,37 @@ class ModeliumMetrics:
         
         # First, try to read from Prometheus gauge (updated by _update_model_qps)
         # This is the most accurate value, updated every 1+ seconds
-        try:
-            # Try to get gauge value with "unknown" GPU label
-            gauge_value = self.model_qps.labels(
-                model=model,
-                runtime=runtime,
-                gpu="unknown"
-            )._value.get()
-            
-            if gauge_value is not None and gauge_value >= 0:
-                # Gauge value is available and valid
-                return float(gauge_value)
-        except Exception as e:
-            # Gauge read failed, fall back to counter calculation
-            pass
+        gauge_value = None
+        gauge_labels_tried = []
+        
+        # Try multiple GPU label values (unknown, actual GPU ID if available)
+        for gpu_label in ["unknown", "0", "1", "2", "3"]:
+            try:
+                gauge_value = self.model_qps.labels(
+                    model=model,
+                    runtime=runtime,
+                    gpu=gpu_label
+                )._value.get()
+                
+                gauge_labels_tried.append(f"{gpu_label}:{gpu_label}")
+                
+                if gauge_value is not None and gauge_value >= 0:
+                    # Gauge value is available and valid
+                    self.logger.info(f"📊 QPS: Read from Prometheus gauge for {model_key} (gpu={gpu_label}): {gauge_value:.2f}")
+                    return float(gauge_value)
+            except Exception as e:
+                gauge_labels_tried.append(f"{gpu_label}:ERROR({str(e)[:50]})")
+                continue
+        
+        # Gauge read failed for all labels - log and fall back to counter
+        self.logger.warning(f"📊 QPS: Could not read gauge for {model_key}, tried labels: {gauge_labels_tried}, falling back to counter")
         
         # Fallback: Calculate from request counter
         count = self._model_request_counts.get(model_key, 0)
         last_update = self._last_qps_update.get(model_key, now)
         elapsed = now - last_update
+        
+        self.logger.info(f"📊 QPS: Counter calculation for {model_key}: count={count}, elapsed={elapsed:.2f}s, last_update={last_update}")
         
         # If we have requests, calculate QPS
         if count > 0 and elapsed > 0:
@@ -317,14 +347,17 @@ class ModeliumMetrics:
             if elapsed < 10.0:
                 # Calculate QPS over the elapsed time (requests per second)
                 qps = count / elapsed
+                self.logger.info(f"📊 QPS: Calculated from counter for {model_key}: {qps:.2f} (count={count}, elapsed={elapsed:.2f}s)")
                 return qps
             else:
                 # Window expired (>10s), counter should be reset by _update_model_qps
                 # But calculate from what we have anyway (average over 10s)
                 qps = count / 10.0
+                self.logger.info(f"📊 QPS: Calculated from counter (expired) for {model_key}: {qps:.2f} (count={count}, window expired)")
                 return qps
         
         # No requests recorded or elapsed is 0
+        self.logger.warning(f"📊 QPS: Returning 0.0 for {model_key} (count={count}, elapsed={elapsed:.2f}s)")
         return 0.0
     
     def get_model_idle_seconds(self, model: str, runtime: str) -> float:
