@@ -229,6 +229,13 @@ class ModeliumBrain:
                     current_state, policies
                 )
                 
+                # Ensure decision has 'actions' key (normalize if needed)
+                if isinstance(decision, list):
+                    decision = {"actions": decision}
+                elif not isinstance(decision, dict) or "actions" not in decision:
+                    logger.warning(f"   ⚠️  Unexpected decision format: {type(decision)}")
+                    decision = {"actions": []}
+                
                 logger.debug(f"   ✅ Decision: {len(decision.get('actions', []))} actions")
                 return decision
                 
