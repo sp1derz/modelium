@@ -168,5 +168,20 @@ def format_orchestration_prompt(
 - DO NOT suggest loading models that don't exist - only evict or keep existing models
 - DO NOT invent model names - only use models from the list above
 
-Decide which models to keep/evict (JSON only, only use models from the list above):"""
+**QPS INTERPRETATION** (CRITICAL):
+- QPS = 0.0 means NO active traffic (model is idle)
+- QPS > 0.1 means active traffic (keep the model)
+- QPS = 0.0 AND idle >5min = truly inactive (can evict)
+- QPS > 0.0 = active (keep, even if idle <5min)
+
+**EXAMPLE DECISIONS**:
+- Model with QPS=0.0, idle=300s → EVICT (inactive)
+- Model with QPS=2.5, idle=10s → KEEP (active traffic)
+- Model with QPS=0.0, idle=30s → KEEP (recent activity, grace period)
+- Model with QPS=0.0, idle=600s → EVICT (truly idle)
+
+Decide which models to keep/evict (JSON only, only use models from the list above):
+- Look at the ACTUAL QPS value in the JSON (not what you think it should be)
+- If QPS=0.0, the model has NO active traffic
+- If QPS>0.0, the model has active traffic"""
 
