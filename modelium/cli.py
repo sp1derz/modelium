@@ -299,19 +299,40 @@ def serve(
         async def list_models():
             """List all models."""
             models = registry.list_models()
-            return {
-                "models": [
-                    {
-                        "name": m.name,
-                        "status": m.status.value,
-                        "runtime": m.runtime,
-                        "gpu": m.target_gpu,
-                        "qps": m.qps,
-                        "idle_seconds": m.idle_seconds,
-                    }
-                    for m in models
-                ]
-            }
+            
+            # Get real-time metrics from Prometheus (not from registry's static fields)
+            result_models = []
+            for m in models:
+                # Get QPS and idle_seconds from Prometheus metrics (real-time)
+                model_qps = 0.0
+                model_idle = 0.0
+                
+                if m.runtime:
+                    try:
+                        model_qps = metrics.get_model_qps(m.name, m.runtime)
+                        model_idle = metrics.get_model_idle_seconds(m.name, m.runtime)
+                        # Handle infinity for idle_seconds
+                        if model_idle == float('inf'):
+                            model_idle = 0.0
+                    except Exception as e:
+                        # If metrics fail, use registry defaults
+                        model_qps = m.qps if hasattr(m, 'qps') else 0.0
+                        model_idle = m.idle_seconds if hasattr(m, 'idle_seconds') else 0.0
+                else:
+                    # No runtime yet, use registry defaults
+                    model_qps = m.qps if hasattr(m, 'qps') else 0.0
+                    model_idle = m.idle_seconds if hasattr(m, 'idle_seconds') else 0.0
+                
+                result_models.append({
+                    "name": m.name,
+                    "status": m.status.value,
+                    "runtime": m.runtime,
+                    "gpu": m.target_gpu,
+                    "qps": model_qps,  # From Prometheus (real-time)
+                    "idle_seconds": model_idle,  # From Prometheus (real-time)
+                })
+            
+            return {"models": result_models}
         
         @app.post("/predict/{model_name}")
         async def predict(model_name: str, request: InferenceRequest):
