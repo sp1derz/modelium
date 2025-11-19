@@ -206,8 +206,8 @@ Decide which models to keep/evict (JSON only, only use models from the list abov
 - If `QPS > 0.0` → Use action "keep" (model is active)
 
 **Example**:
-- Model with `can_evict=false` → {"action": "keep", "model": "model-name", "reasoning": "Not eligible for eviction (can_evict=false)"}
-- Model with `can_evict=true` → {"action": "evict", "model": "model-name", "reasoning": "Eligible for eviction (QPS=0, idle>=180s, grace period passed)"}
+- Model with `can_evict=false` → {{"action": "keep", "model": "model-name", "reasoning": "Not eligible for eviction (can_evict=false)"}}
+- Model with `can_evict=true` → {{"action": "evict", "model": "model-name", "reasoning": "Eligible for eviction (QPS=0, idle>=180s, grace period passed)"}}
 
 **IMPORTANT**: If you suggest "evict" for a model with `can_evict=false`, your decision will be rejected. Always check `can_evict` first!"""
 
