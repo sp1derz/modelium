@@ -181,6 +181,9 @@ class ModeliumMetrics:
         This updates the Prometheus gauge but does NOT reset the counter.
         The counter accumulates requests for a 10-second window.
         Only resets counter when window expires (>10 seconds).
+        
+        IMPORTANT: We don't update _last_qps_update here unless window expired.
+        This allows get_model_qps() to calculate QPS from the full window.
         """
         model_key = f"{model}:{runtime}"
         now = time.time()
@@ -200,16 +203,14 @@ class ModeliumMetrics:
                 gpu=str(gpu) if gpu is not None else "unknown"
             ).set(qps)
             
-            # Only reset counter if window expired (10 seconds)
-            # This allows get_model_qps() to see recent requests
+            # Only reset counter and update timestamp if window expired (10 seconds)
+            # This allows get_model_qps() to see recent requests in the current window
             if elapsed >= 10.0:
                 # Window expired - reset for next window
                 self._model_request_counts[model_key] = 0
                 self._last_qps_update[model_key] = now
-            else:
-                # Window not expired - keep accumulating, just update timestamp
-                # Don't reset counter - let it accumulate for the full window
-                self._last_qps_update[model_key] = now
+            # If window not expired, DON'T update _last_qps_update
+            # This allows get_model_qps() to calculate from the start of the window
     
     def update_model_idle_time(self, model: str, runtime: str):
         """Update idle time for a model."""
@@ -282,29 +283,48 @@ class ModeliumMetrics:
         
         Calculates from request counter over a 10-second sliding window.
         This is called by the orchestrator to get real-time QPS for brain decisions.
+        
+        IMPORTANT: Reads from Prometheus gauge first (most accurate), then falls back to counter.
         """
         model_key = f"{model}:{runtime}"
         now = time.time()
         
-        # Get current count and last update time
+        # First, try to read from Prometheus gauge (updated by _update_model_qps)
+        # This is the most accurate value, updated every 1+ seconds
+        try:
+            # Try to get gauge value with "unknown" GPU label
+            gauge_value = self.model_qps.labels(
+                model=model,
+                runtime=runtime,
+                gpu="unknown"
+            )._value.get()
+            
+            if gauge_value is not None and gauge_value >= 0:
+                # Gauge value is available and valid
+                return float(gauge_value)
+        except Exception as e:
+            # Gauge read failed, fall back to counter calculation
+            pass
+        
+        # Fallback: Calculate from request counter
         count = self._model_request_counts.get(model_key, 0)
         last_update = self._last_qps_update.get(model_key, now)
         elapsed = now - last_update
         
-        # If we have recent requests, calculate QPS
-        if elapsed > 0 and count > 0:
+        # If we have requests, calculate QPS
+        if count > 0 and elapsed > 0:
             # Use a 10-second sliding window
-            # If window hasn't expired, calculate QPS from current count
             if elapsed < 10.0:
-                # Calculate QPS over the elapsed time
-                qps = count / elapsed if elapsed > 0 else 0.0
+                # Calculate QPS over the elapsed time (requests per second)
+                qps = count / elapsed
                 return qps
             else:
                 # Window expired (>10s), counter should be reset by _update_model_qps
-                # But if it hasn't been reset yet, return 0
-                return 0.0
+                # But calculate from what we have anyway (average over 10s)
+                qps = count / 10.0
+                return qps
         
-        # No requests or counter was reset
+        # No requests recorded or elapsed is 0
         return 0.0
     
     def get_model_idle_seconds(self, model: str, runtime: str) -> float:
