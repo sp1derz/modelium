@@ -257,34 +257,33 @@ class ModeliumMetrics:
     
     def get_model_qps(self, model: str, runtime: str) -> float:
         """
-        Get current QPS for a model (from internal tracking).
+        Get current QPS for a model.
         
-        Uses a sliding window: requests in last 5 seconds (more responsive).
+        Calculates from request counter over a 10-second sliding window.
+        This is called by the orchestrator to get real-time QPS for brain decisions.
         """
         model_key = f"{model}:{runtime}"
         now = time.time()
         
-        # Get request timestamps (if we're tracking them)
-        # For now, use simple count-based approach with time window
+        # Get current count and last update time
         count = self._model_request_counts.get(model_key, 0)
         last_update = self._last_qps_update.get(model_key, now)
         elapsed = now - last_update
         
         # If we have recent requests, calculate QPS
         if elapsed > 0 and count > 0:
-            # Use a 5-second window for QPS calculation (more responsive)
-            # Reset count every 5 seconds
-            if elapsed >= 5.0:
-                # Reset for next window, but return QPS for the window that just ended
-                qps = count / 5.0  # Average QPS over the 5-second window
-                self._model_request_counts[model_key] = 0
-                self._last_qps_update[model_key] = now
-                return qps
-            else:
+            # Use a 10-second sliding window
+            # If window hasn't expired, calculate QPS from current count
+            if elapsed < 10.0:
                 # Calculate QPS over the elapsed time
                 qps = count / elapsed if elapsed > 0 else 0.0
                 return qps
+            else:
+                # Window expired (>10s), counter should be reset by _update_model_qps
+                # But if it hasn't been reset yet, return 0
+                return 0.0
         
+        # No requests or counter was reset
         return 0.0
     
     def get_model_idle_seconds(self, model: str, runtime: str) -> float:

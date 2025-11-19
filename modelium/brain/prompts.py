@@ -93,15 +93,17 @@ Given the current state (loaded models, GPU memory, traffic patterns, pending re
 
 **Decision Guidelines**:
 - **Keep** models with:
-  - High QPS (active traffic)
+  - High QPS (>0.1 req/s indicates active traffic)
   - Always-loaded policy (SLA requirements)
   - Recent activity (<5min idle)
   - Pending requests in queue
+  - Recent requests (idle <30s)
   
 - **Evict** models with:
-  - Long idle time (>5min) AND no pending requests
+  - Long idle time (>5min) AND no pending requests AND QPS = 0.0
+  - Zero QPS (0.0) AND idle >5min (truly inactive)
   - Low priority when space needed
-  - Zero QPS and no future demand predicted
+  - No requests in last 5+ minutes
   
 - **Load** models with:
   - Pending requests (especially if waiting >30s)
