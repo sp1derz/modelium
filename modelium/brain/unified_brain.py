@@ -311,6 +311,23 @@ class ModeliumBrain:
         # Parse JSON from output
         decision = self._extract_json(output)
         
+        # Normalize decision format: handle both list and dict responses
+        # Brain might return: [{"action": "keep", ...}] or {"actions": [{"action": "keep", ...}]}
+        if isinstance(decision, list):
+            # Brain returned a list directly, wrap it in dict
+            logger.warning("🧠 Brain returned list instead of dict - normalizing format")
+            decision = {"actions": decision}
+        elif isinstance(decision, dict) and "actions" not in decision:
+            # Brain returned dict but without "actions" key
+            logger.warning("🧠 Brain returned dict without 'actions' key - normalizing format")
+            # Try to find actions in the dict
+            if "action" in decision or any(isinstance(v, list) for v in decision.values()):
+                # Might be a single action or actions in a different key
+                decision = {"actions": [decision] if "action" in decision else list(decision.values())[0]}
+            else:
+                # Fallback: wrap in actions
+                decision = {"actions": []}
+        
         # Log parsed decision
         import json
         logger.info("🧠 BRAIN DECISION (Parsed):")
