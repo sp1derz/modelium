@@ -291,16 +291,20 @@ class ModeliumBrain:
             policies=policies,
         )
         
-        # Log the full prompt being sent to brain
-        logger.info("=" * 80)
-        logger.info("🧠 BRAIN PROMPT (Full):")
-        logger.info("=" * 80)
-        logger.info("SYSTEM PROMPT:")
-        logger.info(ORCHESTRATION_SYSTEM_PROMPT)
-        logger.info("=" * 80)
-        logger.info("USER PROMPT (Current State + Policies):")
-        logger.info(user_prompt)
-        logger.info("=" * 80)
+        # Log full prompt at DEBUG level (too verbose for INFO)
+        logger.debug("=" * 80)
+        logger.debug("🧠 BRAIN PROMPT (Full):")
+        logger.debug("=" * 80)
+        logger.debug("SYSTEM PROMPT:")
+        logger.debug(ORCHESTRATION_SYSTEM_PROMPT)
+        logger.debug("=" * 80)
+        logger.debug("USER PROMPT (Current State + Policies):")
+        logger.debug(user_prompt)
+        logger.debug("=" * 80)
+        
+        # Log concise summary at INFO level
+        num_models = len(current_state.get("models_loaded", []))
+        logger.info(f"🧠 Brain decision requested: {num_models} models loaded")
         
         # Generate with LLM
         output = self._generate(
@@ -310,10 +314,10 @@ class ModeliumBrain:
             temperature=0.3,
         )
         
-        # Log brain's response
-        logger.info("🧠 BRAIN RESPONSE (Raw):")
-        logger.info(output)
-        logger.info("=" * 80)
+        # Log raw response at DEBUG level (too verbose)
+        logger.debug("🧠 BRAIN RESPONSE (Raw):")
+        logger.debug(output)
+        logger.debug("=" * 80)
         
         # Parse JSON from output
         decision = self._extract_json(output)
@@ -335,11 +339,26 @@ class ModeliumBrain:
                 # Fallback: wrap in actions
                 decision = {"actions": []}
         
-        # Log parsed decision
+        # Log parsed decision summary at INFO level
         import json
-        logger.info("🧠 BRAIN DECISION (Parsed):")
-        logger.info(json.dumps(decision, indent=2))
-        logger.info("=" * 80)
+        actions = decision.get("actions", [])
+        action_summary = {}
+        for action in actions:
+            action_type = action.get("action", "unknown")
+            model_name = action.get("model", "unknown")
+            if action_type not in action_summary:
+                action_summary[action_type] = []
+            action_summary[action_type].append(model_name)
+        
+        summary_parts = []
+        for action_type, models in action_summary.items():
+            summary_parts.append(f"{action_type}: {', '.join(models)}")
+        
+        logger.info(f"🧠 Brain decision: {', '.join(summary_parts) if summary_parts else 'no actions'}")
+        
+        # Log full parsed decision at DEBUG level
+        logger.debug("🧠 BRAIN DECISION (Parsed):")
+        logger.debug(json.dumps(decision, indent=2))
         
         return decision
     

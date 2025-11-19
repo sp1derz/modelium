@@ -132,7 +132,7 @@ class Orchestrator:
             raise RuntimeError("Brain model is required but not loaded")
         
         # Brain is available - use it (MANDATORY)
-        logger.info("🧠 Using Brain (Qwen) for orchestration decision...")
+        logger.debug("🧠 Using Brain (Qwen) for orchestration decision...")
         
         # Build current state for brain (ONLY relevant Prometheus metrics)
            # We only send what the brain needs, not everything
@@ -228,7 +228,8 @@ class Orchestrator:
             raise RuntimeError(f"Brain orchestration failed: {e}")
         
         if brain_decision and "actions" in brain_decision:
-            logger.info(f"🧠 Brain made {len(brain_decision.get('actions', []))} decisions")
+            # Decision summary already logged by brain, just log count at DEBUG
+            logger.debug(f"🧠 Brain returned {len(brain_decision.get('actions', []))} actions")
             
             # Get list of actual model names for validation
             actual_model_names = {m.name for m in loaded_models}
