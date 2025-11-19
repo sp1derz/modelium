@@ -168,20 +168,31 @@ def format_orchestration_prompt(
 - DO NOT suggest loading models that don't exist - only evict or keep existing models
 - DO NOT invent model names - only use models from the list above
 
-**QPS INTERPRETATION** (CRITICAL):
+**GRACE PERIOD & EVICTION RULES** (CRITICAL):
+- Models have a 120-second grace period after loading (within_grace_period=true)
+- NEVER evict models within grace period (time_since_load < 120s)
+- NEVER evict models with QPS > 0.0 (active traffic)
+- ONLY evict if: QPS = 0.0 AND idle >= 180s (3 minutes) AND time_since_load >= 120s (grace period passed)
+
+**QPS INTERPRETATION**:
 - QPS = 0.0 means NO active traffic (model is idle)
 - QPS > 0.1 means active traffic (keep the model)
-- QPS = 0.0 AND idle >5min = truly inactive (can evict)
 - QPS > 0.0 = active (keep, even if idle <5min)
 
+**EVICTION ELIGIBILITY** (check can_evict field):
+- can_evict=true: Model is eligible for eviction (QPS=0 AND idle>=180s AND grace period passed)
+- can_evict=false: Model is NOT eligible (within grace period OR has traffic OR idle <180s)
+- within_grace_period=true: Model just loaded, DO NOT EVICT
+
 **EXAMPLE DECISIONS**:
-- Model with QPS=0.0, idle=300s → EVICT (inactive)
+- Model with QPS=0.0, idle=30s, time_since_load=7s, within_grace_period=true → KEEP (grace period)
+- Model with QPS=0.0, idle=200s, time_since_load=300s, can_evict=true → EVICT (truly inactive)
 - Model with QPS=2.5, idle=10s → KEEP (active traffic)
-- Model with QPS=0.0, idle=30s → KEEP (recent activity, grace period)
-- Model with QPS=0.0, idle=600s → EVICT (truly idle)
+- Model with QPS=0.0, idle=100s, time_since_load=150s, can_evict=false → KEEP (idle <180s)
 
 Decide which models to keep/evict (JSON only, only use models from the list above):
-- Look at the ACTUAL QPS value in the JSON (not what you think it should be)
-- If QPS=0.0, the model has NO active traffic
-- If QPS>0.0, the model has active traffic"""
+- Check can_evict field: ONLY evict if can_evict=true
+- Check within_grace_period: NEVER evict if within_grace_period=true
+- Check QPS: NEVER evict if QPS > 0.0
+- Look at the ACTUAL QPS value in the JSON (not what you think it should be)"""
 

@@ -1094,33 +1094,61 @@ if [ ! -z "$SECOND_MODEL" ]; then
     
     # Don't send any requests to SECOND_MODEL - it should be idle
     
-    # Wait for brain to make decision (decision_interval is 10s)
+    # Monitor for 10 minutes (600 seconds) to test live QPS tracking
+    # Send occasional requests to SECOND_MODEL to test if QPS increases
     echo ""
-    echo "⏳ Waiting for brain to make orchestration decision (checking every 10s)..."
+    echo "⏳ Monitoring for 10 minutes (600s) to test live QPS tracking..."
     echo "  Brain should detect:"
     echo "    - $FIRST_MODEL: Active (QPS > 0) → KEEP"
-    echo "    - $SECOND_MODEL: Idle (QPS = 0) → EVICT (if idle > threshold)"
+    echo "    - $SECOND_MODEL: Idle (QPS = 0) → EVICT only if: QPS=0 AND idle>=180s AND grace period passed (120s)"
+    echo ""
+    echo "  Test plan:"
+    echo "    - Grace period: 120s (model protected from eviction)"
+    echo "    - Min idle for eviction: 180s (3 minutes of zero QPS)"
+    echo "    - Will send test requests to $SECOND_MODEL at 2min, 4min, 6min to test QPS tracking"
+    echo "    - You can also send requests from another session to test live QPS"
     
     INITIAL_SECOND_STATUS=$(curl -s http://localhost:8000/models | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .status" 2>/dev/null || echo "unknown")
     echo "  Initial $SECOND_MODEL status: $INITIAL_SECOND_STATUS"
+    echo ""
     
-    # Wait up to 2 minutes for brain to unload (decision every 10s, grace period 120s)
-    # But we'll check after grace period + a few decision cycles
-    echo "  Waiting 130 seconds (grace period 120s + 10s for decision)..."
-    for i in {1..13}; do
+    # Monitor for 10 minutes (60 iterations of 10 seconds each)
+    START_TIME=$(date +%s)
+    for i in {1..60}; do
         sleep 10
+        ELAPSED=$((i * 10))
         MODELS=$(curl -s http://localhost:8000/models)
         SECOND_STATUS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .status" 2>/dev/null || echo "unknown")
         SECOND_IDLE=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .idle_seconds" 2>/dev/null || echo "0")
         FIRST_QPS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$FIRST_MODEL\") | .qps" 2>/dev/null || echo "0")
         SECOND_QPS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .qps" 2>/dev/null || echo "0")
         
-        echo "    After $((i*10))s: $SECOND_MODEL status=$SECOND_STATUS, idle=${SECOND_IDLE}s, QPS=$SECOND_QPS"
-        echo "                      $FIRST_MODEL QPS=$FIRST_QPS (should be > 0)"
+        # Send test requests to SECOND_MODEL at specific times to test QPS tracking
+        if [ $ELAPSED -eq 120 ] || [ $ELAPSED -eq 240 ] || [ $ELAPSED -eq 360 ]; then
+            echo ""
+            echo "  🧪 Sending test request to $SECOND_MODEL at ${ELAPSED}s to test QPS tracking..."
+            curl -s -X POST http://localhost:8000/predict/$SECOND_MODEL \
+              -H "Content-Type: application/json" \
+              -d "{\"prompt\": \"QPS test at ${ELAPSED}s\", \"max_tokens\": 5, \"organizationId\": \"test-company\"}" > /dev/null
+            echo "  ✅ Test request sent - QPS should increase"
+            sleep 2  # Wait for QPS to update
+            MODELS=$(curl -s http://localhost:8000/models)
+            SECOND_QPS=$(echo "$MODELS" | jq -r ".models[] | select(.name==\"$SECOND_MODEL\") | .qps" 2>/dev/null || echo "0")
+        fi
         
+        # Format elapsed time
+        MINUTES=$((ELAPSED / 60))
+        SECONDS=$((ELAPSED % 60))
+        printf "    [%02d:%02d] %s: status=%s, idle=%.1fs, QPS=%.2f | %s: QPS=%.2f\n" \
+            $MINUTES $SECONDS \
+            "$SECOND_MODEL" "$SECOND_STATUS" "$SECOND_IDLE" "$SECOND_QPS" \
+            "$FIRST_MODEL" "$FIRST_QPS"
+        
+        # Check if model was evicted
         if [ "$SECOND_STATUS" = "unloaded" ]; then
             echo ""
             echo "  ✅ Brain unloaded $SECOND_MODEL (idle model)!"
+            echo "  📊 Eviction occurred at ${ELAPSED}s"
             test_success "Brain correctly unloaded idle model"
             break
         fi
