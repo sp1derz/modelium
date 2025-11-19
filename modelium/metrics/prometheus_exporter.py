@@ -161,18 +161,32 @@ class ModeliumMetrics:
         
         # Update request tracking for QPS calculation
         model_key = f"{model}:{runtime}"
-        self._model_request_counts[model_key] = self._model_request_counts.get(model_key, 0) + 1
-        self._model_last_request[model_key] = time.time()
+        now = time.time()
         
-        # Initialize last_update if not set
-        if model_key not in self._last_qps_update:
-            self._last_qps_update[model_key] = time.time()
+        # Increment request counter
+        old_count = self._model_request_counts.get(model_key, 0)
+        self._model_request_counts[model_key] = old_count + 1
+        self._model_last_request[model_key] = now
+        
+        # Initialize last_update if not set (start of window)
+        is_new_window = model_key not in self._last_qps_update
+        if is_new_window:
+            self._last_qps_update[model_key] = now
+            self.logger.info(f"📊 QPS: Initialized window for {model_key} at {now}")
         
         # Update QPS gauge periodically (every 1+ seconds) but DON'T reset counter
         # Counter accumulates for 10-second window, then resets
-        last_update = self._last_qps_update.get(model_key, time.time())
-        if time.time() - last_update >= 1.0:
+        last_update = self._last_qps_update.get(model_key, now)
+        elapsed_since_update = now - last_update
+        
+        # Log request recording
+        self.logger.info(f"📊 QPS: Recorded request for {model_key}: count={self._model_request_counts[model_key]} (was {old_count}), elapsed={elapsed_since_update:.2f}s, gpu={gpu}")
+        
+        if elapsed_since_update >= 1.0:
+            self.logger.info(f"📊 QPS: Updating gauge for {model_key} (elapsed={elapsed_since_update:.2f}s >= 1.0s)")
             self._update_model_qps(model, runtime, gpu)
+        else:
+            self.logger.debug(f"📊 QPS: Skipping gauge update for {model_key} (elapsed={elapsed_since_update:.2f}s < 1.0s)")
     
     def _update_model_qps(self, model: str, runtime: str, gpu: Optional[int]):
         """
