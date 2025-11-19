@@ -191,8 +191,23 @@ def format_orchestration_prompt(
 - Model with QPS=0.0, idle=100s, time_since_load=150s, can_evict=false → KEEP (idle <180s)
 
 Decide which models to keep/evict (JSON only, only use models from the list above):
-- Check can_evict field: ONLY evict if can_evict=true
-- Check within_grace_period: NEVER evict if within_grace_period=true
-- Check QPS: NEVER evict if QPS > 0.0
-- Look at the ACTUAL QPS value in the JSON (not what you think it should be)"""
+
+**CRITICAL EVICTION RULES - FOLLOW EXACTLY**:
+1. **ONLY evict models where can_evict=true** - If can_evict=false, you MUST use "keep" action
+2. **NEVER evict if within_grace_period=true** - Always use "keep" for these models
+3. **NEVER evict if QPS > 0.0** - Always use "keep" for active models
+4. **If can_evict=false, the model is NOT eligible for eviction** - Use "keep" action
+
+**Decision Logic**:
+- For each model, check the `can_evict` field FIRST
+- If `can_evict=false` → Use action "keep" (model is protected)
+- If `can_evict=true` → You MAY use action "evict" (model is eligible)
+- If `within_grace_period=true` → Use action "keep" (model is protected)
+- If `QPS > 0.0` → Use action "keep" (model is active)
+
+**Example**:
+- Model with `can_evict=false` → {"action": "keep", "model": "model-name", "reasoning": "Not eligible for eviction (can_evict=false)"}
+- Model with `can_evict=true` → {"action": "evict", "model": "model-name", "reasoning": "Eligible for eviction (QPS=0, idle>=180s, grace period passed)"}
+
+**IMPORTANT**: If you suggest "evict" for a model with `can_evict=false`, your decision will be rejected. Always check `can_evict` first!"""
 

@@ -154,8 +154,18 @@ class Orchestrator:
             # Check if model is within grace period
             within_grace_period = time_since_load is not None and time_since_load < grace_period
             
-            # Check if model meets eviction criteria (QPS=0 AND idle > min_idle)
-            can_evict = (qps == 0.0 and idle_seconds >= min_idle_for_eviction) and not within_grace_period
+            # Check if model meets eviction criteria (QPS=0 AND idle >= min_idle AND grace period passed)
+            # CRITICAL: All three conditions must be true:
+            # 1. QPS must be exactly 0.0 (no active traffic)
+            # 2. Idle time must be >= 180s (3 minutes of inactivity)
+            # 3. Grace period must have passed (time_since_load >= 120s)
+            can_evict = (
+                qps == 0.0 and 
+                idle_seconds >= min_idle_for_eviction and 
+                not within_grace_period and
+                time_since_load is not None and
+                time_since_load >= grace_period
+            )
             
             model_data = {
                 "name": m.name,
@@ -227,6 +237,13 @@ class Orchestrator:
                     continue
                 
                 if action_type == "evict" and model_name:
+                    # PRE-FILTER: Check can_evict from models_data before doing expensive validation
+                    model_data = next((m for m in models_data if m.get("name") == model_name), None)
+                    if model_data and not model_data.get("can_evict", False):
+                        logger.warning(f"🧠 Brain suggested evicting '{model_name}' but can_evict=false - IGNORING (pre-filter)")
+                        logger.warning(f"   Model data: QPS={model_data.get('qps', 0):.2f}, idle={model_data.get('idle_seconds', 0):.1f}s, within_grace={model_data.get('within_grace_period', False)}")
+                        logger.warning(f"   Brain should have used 'keep' action for this model")
+                        continue
                     # CRITICAL: Double-check eviction eligibility before executing
                     model_info = self.registry.get_model(model_name)
                     if not model_info:
