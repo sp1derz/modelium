@@ -159,13 +159,14 @@ class Orchestrator:
             # Check if model is within grace period
             within_grace_period = time_since_load is not None and time_since_load < grace_period
             
-            # Check if model meets eviction criteria (QPS=0 AND idle >= min_idle AND grace period passed)
+            # Check if model meets eviction criteria (QPM=0 AND idle >= min_idle AND grace period passed)
             # CRITICAL: All three conditions must be true:
-            # 1. QPS must be exactly 0.0 (no active traffic)
+            # 1. QPM must be exactly 0.0 (no active traffic in last 60s)
             # 2. Idle time must be >= 180s (3 minutes of inactivity)
             # 3. Grace period must have passed (time_since_load >= 120s)
+            # Use QPM instead of QPS for more stable decisions (60s window vs 10s)
             can_evict = (
-                qps == 0.0 and 
+                qpm == 0.0 and 
                 idle_seconds >= min_idle_for_eviction and 
                 not within_grace_period and
                 time_since_load is not None and
@@ -187,11 +188,11 @@ class Orchestrator:
             models_data.append(model_data)
             
             if within_grace_period:
-                logger.info(f"   📊 Prometheus data for {m.name}: QPS={qps:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s [GRACE PERIOD - NOT ELIGIBLE FOR EVICTION]")
+                logger.info(f"   📊 Prometheus data for {m.name}: QPM={qpm:.2f} (QPS={qps:.2f}), idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s [GRACE PERIOD - NOT ELIGIBLE FOR EVICTION]")
             elif can_evict:
-                logger.info(f"   📊 Prometheus data for {m.name}: QPS={qps:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s [ELIGIBLE FOR EVICTION: QPS=0 AND idle>{min_idle_for_eviction}s]")
+                logger.info(f"   📊 Prometheus data for {m.name}: QPM={qpm:.2f} (QPS={qps:.2f}), idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s [ELIGIBLE FOR EVICTION: QPM=0 AND idle>{min_idle_for_eviction}s]")
             else:
-                logger.info(f"   📊 Prometheus data for {m.name}: QPS={qps:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s")
+                logger.info(f"   📊 Prometheus data for {m.name}: QPM={qpm:.2f} (QPS={qps:.2f}), idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s")
         
         current_state = {
             "models_loaded": models_data,

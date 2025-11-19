@@ -231,15 +231,17 @@ class ModeliumMetrics:
         if gpu is not None:
             self._model_gpu_map[model_key] = gpu
         
-        # Increment request counter
+        # Increment request counters (both QPS and QPM)
         old_count = self._model_request_counts.get(model_key, 0)
         self._model_request_counts[model_key] = old_count + 1
+        self._model_qpm_counts[model_key] = self._model_qpm_counts.get(model_key, 0) + 1
         self._model_last_request[model_key] = now
         
         # Initialize last_update if not set (start of window)
         is_new_window = model_key not in self._last_qps_update
         if is_new_window:
             self._last_qps_update[model_key] = now
+            self._last_qpm_update[model_key] = now
             self.logger.info(f"📊 QPS: Initialized window for {model_key} at {now}")
         
         # Update QPS gauge periodically (every 1+ seconds) but DON'T reset counter
