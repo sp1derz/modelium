@@ -161,17 +161,20 @@ class ModeliumMetrics:
         
         # Update request tracking for QPS calculation
         model_key = f"{model}:{runtime}"
-        self._model_request_counts[model_key] = self._model_request_counts.get(model_key, 0) + 1
-        self._model_last_request[model_key] = time.time()
+        now = time.time()
         
-        # Initialize last_update if not set
+        # Increment request counter
+        self._model_request_counts[model_key] = self._model_request_counts.get(model_key, 0) + 1
+        self._model_last_request[model_key] = now
+        
+        # Initialize last_update if not set (start of window)
         if model_key not in self._last_qps_update:
-            self._last_qps_update[model_key] = time.time()
+            self._last_qps_update[model_key] = now
         
         # Update QPS gauge periodically (every 1+ seconds) but DON'T reset counter
         # Counter accumulates for 10-second window, then resets
-        last_update = self._last_qps_update.get(model_key, time.time())
-        if time.time() - last_update >= 1.0:
+        last_update = self._last_qps_update.get(model_key, now)
+        if now - last_update >= 1.0:
             self._update_model_qps(model, runtime, gpu)
     
     def _update_model_qps(self, model: str, runtime: str, gpu: Optional[int]):
@@ -284,29 +287,13 @@ class ModeliumMetrics:
         Calculates from request counter over a 10-second sliding window.
         This is called by the orchestrator to get real-time QPS for brain decisions.
         
-        IMPORTANT: Reads from Prometheus gauge first (most accurate), then falls back to counter.
+        IMPORTANT: Uses counter-based calculation (most reliable).
+        Prometheus gauge is updated periodically but counter is real-time.
         """
         model_key = f"{model}:{runtime}"
         now = time.time()
         
-        # First, try to read from Prometheus gauge (updated by _update_model_qps)
-        # This is the most accurate value, updated every 1+ seconds
-        try:
-            # Try to get gauge value with "unknown" GPU label
-            gauge_value = self.model_qps.labels(
-                model=model,
-                runtime=runtime,
-                gpu="unknown"
-            )._value.get()
-            
-            if gauge_value is not None and gauge_value >= 0:
-                # Gauge value is available and valid
-                return float(gauge_value)
-        except Exception as e:
-            # Gauge read failed, fall back to counter calculation
-            pass
-        
-        # Fallback: Calculate from request counter
+        # Calculate from request counter (most reliable, real-time)
         count = self._model_request_counts.get(model_key, 0)
         last_update = self._last_qps_update.get(model_key, now)
         elapsed = now - last_update
@@ -321,7 +308,7 @@ class ModeliumMetrics:
             else:
                 # Window expired (>10s), counter should be reset by _update_model_qps
                 # But calculate from what we have anyway (average over 10s)
-                qps = count / 10.0
+                qps = count / 10.0 if count > 0 else 0.0
                 return qps
         
         # No requests recorded or elapsed is 0
