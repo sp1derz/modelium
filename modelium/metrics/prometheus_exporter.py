@@ -309,7 +309,7 @@ class ModeliumMetrics:
         """Update count of loaded models for a runtime."""
         self.models_loaded.labels(runtime=runtime).set(count)
     
-    def get_model_qps(self, model: str, runtime: str) -> float:
+    def get_model_qps(self, model: str, runtime: str, gpu: Optional[int] = None) -> float:
         """
         Get current QPS for a model.
         
@@ -317,21 +317,49 @@ class ModeliumMetrics:
         This is called by the orchestrator to get real-time QPS for brain decisions.
         
         IMPORTANT: Reads from Prometheus gauge first (most accurate), then falls back to counter.
+        
+        Args:
+            model: Model name
+            runtime: Runtime name (ray, vllm, triton)
+            gpu: Optional GPU ID where the model is loaded. If provided, reads from that specific GPU label first.
+                 This ensures accurate QPS per model when multiple models are on different GPUs.
         """
         model_key = f"{model}:{runtime}"
         now = time.time()
         
         # First, try to read from Prometheus gauge (updated by _update_model_qps)
         # This is the most accurate value, updated every 1+ seconds
-        gauge_value = None
+        
+        # If GPU ID is provided, try that specific GPU first (most accurate)
+        # This is critical when multiple models are on different GPUs
+        if gpu is not None:
+            gpu_label = str(gpu)
+            try:
+                gauge_value = self.model_qps.labels(
+                    model=model,
+                    runtime=runtime,
+                    gpu=gpu_label
+                )._value.get()
+                
+                if gauge_value is not None and gauge_value >= 0:
+                    self.logger.debug(f"📊 QPS: Read from Prometheus gauge for {model_key} (gpu={gpu_label}): {gauge_value:.2f}")
+                    return float(gauge_value)
+            except Exception as e:
+                self.logger.debug(f"📊 QPS: Failed to read gauge for {model_key} (gpu={gpu_label}): {e}, trying fallback")
+        
+        # Fallback: Try all GPU labels if specific GPU not found or not provided
+        # This handles edge cases where GPU label might not match
         gauge_labels_tried = []
         best_gauge_value = None
         best_gpu_label = None
         
-        # Try multiple GPU label values (unknown, actual GPU ID if available)
-        # IMPORTANT: Try all labels and pick the one with highest value (most recent)
-        # Don't return early on first match, as "unknown" might be 0.0 while actual GPU has value
-        for gpu_label in ["unknown", "0", "1", "2", "3"]:
+        # Build list of GPU labels to try (prioritize provided GPU if available)
+        gpu_labels_to_try = []
+        if gpu is not None:
+            gpu_labels_to_try.append(str(gpu))  # Try provided GPU first
+        gpu_labels_to_try.extend(["unknown", "0", "1", "2", "3"])  # Then try others
+        
+        for gpu_label in gpu_labels_to_try:
             try:
                 gauge_value = self.model_qps.labels(
                     model=model,
