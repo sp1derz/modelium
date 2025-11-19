@@ -135,7 +135,7 @@ class Orchestrator:
         logger.debug("🧠 Using Brain (Qwen) for orchestration decision...")
         
         # Build current state for brain (ONLY relevant Prometheus metrics)
-           # We only send what the brain needs, not everything
+        # We only send what the brain needs, not everything
         # CRITICAL: Enforce grace period - don't even consider models for eviction if within grace period
         grace_period = 120  # 120 seconds grace period for newly loaded models
         min_idle_for_eviction = 180  # 3 minutes of zero QPS before eviction
