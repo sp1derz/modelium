@@ -141,13 +141,13 @@ class Orchestrator:
         min_idle_for_eviction = 180  # 3 minutes of zero QPS before eviction
         
         models_data = []
-           for m in loaded_models:
-               # Get relevant metrics from Prometheus
-               # Pass GPU ID to ensure we get QPS for the specific model on its specific GPU
-               # This is critical when multiple models are on different GPUs
-               model_gpu = m.target_gpu if hasattr(m, 'target_gpu') and m.target_gpu is not None else None
-               qps = self.metrics.get_model_qps(m.name, m.runtime, gpu=model_gpu)
-               idle_seconds = self.metrics.get_model_idle_seconds(m.name, m.runtime)
+        for m in loaded_models:
+            # Get relevant metrics from Prometheus
+            # Pass GPU ID to ensure we get QPS for the specific model on its specific GPU
+            # This is critical when multiple models are on different GPUs
+            model_gpu = m.target_gpu if hasattr(m, 'target_gpu') and m.target_gpu is not None else None
+            qps = self.metrics.get_model_qps(m.name, m.runtime, gpu=model_gpu)
+            idle_seconds = self.metrics.get_model_idle_seconds(m.name, m.runtime)
             
             # Calculate time since load
             time_since_load = None
