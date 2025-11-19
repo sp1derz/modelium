@@ -164,13 +164,24 @@ class ModeliumMetrics:
         self._model_request_counts[model_key] = self._model_request_counts.get(model_key, 0) + 1
         self._model_last_request[model_key] = time.time()
         
-        # Update QPS if it's been >1 second
-        last_update = self._last_qps_update.get(model_key, 0)
+        # Initialize last_update if not set
+        if model_key not in self._last_qps_update:
+            self._last_qps_update[model_key] = time.time()
+        
+        # Update QPS gauge periodically (every 1+ seconds) but DON'T reset counter
+        # Counter accumulates for 10-second window, then resets
+        last_update = self._last_qps_update.get(model_key, time.time())
         if time.time() - last_update >= 1.0:
             self._update_model_qps(model, runtime, gpu)
     
     def _update_model_qps(self, model: str, runtime: str, gpu: Optional[int]):
-        """Calculate and update QPS for a model."""
+        """
+        Calculate and update QPS gauge for a model.
+        
+        This updates the Prometheus gauge but does NOT reset the counter.
+        The counter accumulates requests for a 10-second window.
+        Only resets counter when window expires (>10 seconds).
+        """
         model_key = f"{model}:{runtime}"
         now = time.time()
         last_update = self._last_qps_update.get(model_key, now)
@@ -178,17 +189,27 @@ class ModeliumMetrics:
         
         if elapsed > 0:
             count = self._model_request_counts.get(model_key, 0)
-            qps = count / elapsed
             
+            # Calculate QPS over the elapsed time
+            qps = count / elapsed if elapsed > 0 else 0.0
+            
+            # Update Prometheus gauge
             self.model_qps.labels(
                 model=model,
                 runtime=runtime,
                 gpu=str(gpu) if gpu is not None else "unknown"
             ).set(qps)
             
-            # Reset counter
-            self._model_request_counts[model_key] = 0
-            self._last_qps_update[model_key] = now
+            # Only reset counter if window expired (10 seconds)
+            # This allows get_model_qps() to see recent requests
+            if elapsed >= 10.0:
+                # Window expired - reset for next window
+                self._model_request_counts[model_key] = 0
+                self._last_qps_update[model_key] = now
+            else:
+                # Window not expired - keep accumulating, just update timestamp
+                # Don't reset counter - let it accumulate for the full window
+                self._last_qps_update[model_key] = now
     
     def update_model_idle_time(self, model: str, runtime: str):
         """Update idle time for a model."""
