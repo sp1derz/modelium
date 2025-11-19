@@ -216,64 +216,64 @@ class Orchestrator:
             
             # Execute brain's decisions
             for action in brain_decision.get("actions", []):
-                   action_type = action.get("action")
-                   model_name = action.get("model")
-                   reasoning = action.get("reasoning", "")
-                   
-                   # Validate model exists (prevent brain from hallucinating models)
-                   if model_name and model_name not in actual_model_names:
-                       logger.warning(f"🧠 Brain suggested action for non-existent model '{model_name}' - ignoring")
-                       logger.warning(f"   Available models: {list(actual_model_names)}")
-                       continue
-                   
-                   if action_type == "evict" and model_name:
-                       # CRITICAL: Double-check eviction eligibility before executing
-                       model_info = self.registry.get_model(model_name)
-                       if not model_info:
-                           logger.warning(f"🧠 Brain suggested evicting '{model_name}' but model not found in registry")
-                           continue
-                       
-                       # Check grace period
-                       if model_info.loaded_at:
-                           time_since_load = time.time() - model_info.loaded_at
-                           if time_since_load < grace_period:
-                               logger.warning(f"🧠 Brain suggested evicting '{model_name}' but it's within grace period ({time_since_load:.1f}s < {grace_period}s) - IGNORING")
-                               logger.warning(f"   Model must be loaded for at least {grace_period}s before eviction")
-                               continue
-                       
-                       # Check QPS and idle time
-                       qps = self.metrics.get_model_qps(model_name, model_info.runtime)
-                       idle_seconds = self.metrics.get_model_idle_seconds(model_name, model_info.runtime)
-                       
-                       if qps > 0.0:
-                           logger.warning(f"🧠 Brain suggested evicting '{model_name}' but QPS={qps:.2f} > 0 - IGNORING (model is active)")
-                           continue
-                       
-                       if idle_seconds < min_idle_for_eviction:
-                           logger.warning(f"🧠 Brain suggested evicting '{model_name}' but idle={idle_seconds:.1f}s < {min_idle_for_eviction}s - IGNORING (too recent)")
-                           continue
-                       
-                       logger.info(f"🧠 Brain decision: Unload {model_name} - {reasoning}")
-                       logger.info(f"   ✅ Eviction validated: QPS={qps:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s")
-                       
-                       # Get runtime before unloading (for metrics)
-                       runtime = model_info.runtime
-                       
-                       success = self.runtime_manager.unload_model(model_name)
-                       if success:
-                           self.registry.update_model(model_name, status=ModelStatus.UNLOADED)
-                           self.metrics.record_model_unload(runtime, "success")
-                           self.metrics.record_orchestration_decision("unload", f"brain_{reasoning}")
-                           logger.info(f"   ✅ {model_name} unloaded successfully (removed from RuntimeManager)")
-                       else:
-                           logger.error(f"   ❌ Failed to unload {model_name} (may already be unloaded)")
-                           self.metrics.record_model_unload(runtime, "error")
-                   elif action_type == "keep" and model_name:
-                       logger.debug(f"🧠 Brain decision: Keep {model_name} - {reasoning}")
-                   elif action_type == "load" and model_name:
-                       logger.warning(f"🧠 Brain suggested loading '{model_name}' - load actions handled by on_model_discovered")
-                       # Load actions are handled when models are discovered, not here
-                   # Note: "load" actions are handled by on_model_discovered
+                action_type = action.get("action")
+                model_name = action.get("model")
+                reasoning = action.get("reasoning", "")
+                
+                # Validate model exists (prevent brain from hallucinating models)
+                if model_name and model_name not in actual_model_names:
+                    logger.warning(f"🧠 Brain suggested action for non-existent model '{model_name}' - ignoring")
+                    logger.warning(f"   Available models: {list(actual_model_names)}")
+                    continue
+                
+                if action_type == "evict" and model_name:
+                    # CRITICAL: Double-check eviction eligibility before executing
+                    model_info = self.registry.get_model(model_name)
+                    if not model_info:
+                        logger.warning(f"🧠 Brain suggested evicting '{model_name}' but model not found in registry")
+                        continue
+                    
+                    # Check grace period
+                    if model_info.loaded_at:
+                        time_since_load = time.time() - model_info.loaded_at
+                        if time_since_load < grace_period:
+                            logger.warning(f"🧠 Brain suggested evicting '{model_name}' but it's within grace period ({time_since_load:.1f}s < {grace_period}s) - IGNORING")
+                            logger.warning(f"   Model must be loaded for at least {grace_period}s before eviction")
+                            continue
+                    
+                    # Check QPS and idle time
+                    qps = self.metrics.get_model_qps(model_name, model_info.runtime)
+                    idle_seconds = self.metrics.get_model_idle_seconds(model_name, model_info.runtime)
+                    
+                    if qps > 0.0:
+                        logger.warning(f"🧠 Brain suggested evicting '{model_name}' but QPS={qps:.2f} > 0 - IGNORING (model is active)")
+                        continue
+                    
+                    if idle_seconds < min_idle_for_eviction:
+                        logger.warning(f"🧠 Brain suggested evicting '{model_name}' but idle={idle_seconds:.1f}s < {min_idle_for_eviction}s - IGNORING (too recent)")
+                        continue
+                    
+                    logger.info(f"🧠 Brain decision: Unload {model_name} - {reasoning}")
+                    logger.info(f"   ✅ Eviction validated: QPS={qps:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s")
+                    
+                    # Get runtime before unloading (for metrics)
+                    runtime = model_info.runtime
+                    
+                    success = self.runtime_manager.unload_model(model_name)
+                    if success:
+                        self.registry.update_model(model_name, status=ModelStatus.UNLOADED)
+                        self.metrics.record_model_unload(runtime, "success")
+                        self.metrics.record_orchestration_decision("unload", f"brain_{reasoning}")
+                        logger.info(f"   ✅ {model_name} unloaded successfully (removed from RuntimeManager)")
+                    else:
+                        logger.error(f"   ❌ Failed to unload {model_name} (may already be unloaded)")
+                        self.metrics.record_model_unload(runtime, "error")
+                elif action_type == "keep" and model_name:
+                    logger.debug(f"🧠 Brain decision: Keep {model_name} - {reasoning}")
+                elif action_type == "load" and model_name:
+                    logger.warning(f"🧠 Brain suggested loading '{model_name}' - load actions handled by on_model_discovered")
+                    # Load actions are handled when models are discovered, not here
+                # Note: "load" actions are handled by on_model_discovered
         else:
             logger.warning(f"🧠 Brain returned invalid decision (no actions)")
             raise RuntimeError("Brain decision returned no actions")
