@@ -187,12 +187,13 @@ class Orchestrator:
             }
             models_data.append(model_data)
             
+            # Only log detailed metrics at DEBUG level (too verbose for INFO)
             if within_grace_period:
-                logger.info(f"   📊 Prometheus data for {m.name}: QPM={qpm:.2f} (QPS={qps:.2f}), idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s [GRACE PERIOD - NOT ELIGIBLE FOR EVICTION]")
+                logger.debug(f"   📊 {m.name}: QPM={qpm:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s [GRACE PERIOD]")
             elif can_evict:
-                logger.info(f"   📊 Prometheus data for {m.name}: QPM={qpm:.2f} (QPS={qps:.2f}), idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s [ELIGIBLE FOR EVICTION: QPM=0 AND idle>{min_idle_for_eviction}s]")
+                logger.debug(f"   📊 {m.name}: QPM={qpm:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s [ELIGIBLE FOR EVICTION]")
             else:
-                logger.info(f"   📊 Prometheus data for {m.name}: QPM={qpm:.2f} (QPS={qps:.2f}), idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s")
+                logger.debug(f"   📊 {m.name}: QPM={qpm:.2f}, idle={idle_seconds:.1f}s, since_load={time_since_load:.1f}s")
         
         current_state = {
             "models_loaded": models_data,
@@ -207,13 +208,14 @@ class Orchestrator:
             "evict_when_memory_above_percent": policies.evict_when_memory_above_percent,
         }
         
-        # Log what we're sending to brain
-        logger.info("📤 Sending to Brain (Qwen):")
-        logger.info(f"   Models: {len(models_data)} loaded")
+        # Log concise summary at INFO level, detailed data at DEBUG
+        logger.info(f"📤 Brain decision: {len(models_data)} models loaded, GPU pressure: {gpu_memory_pressure}")
+        logger.debug("📤 Sending to Brain (Qwen):")
+        logger.debug(f"   Models: {len(models_data)} loaded")
         for m in models_data:
-            logger.info(f"      - {m['name']}: QPM={m.get('qpm', 0):.2f} (QPS={m['qps']:.2f}), idle={m['idle_seconds']:.1f}s, GPU={m['gpu']}, since_load={m.get('time_since_load_seconds', 0):.1f}s")
-        logger.info(f"   GPU memory pressure: {gpu_memory_pressure}")
-        logger.info(f"   Policies: evict_after_idle={idle_threshold}s, always_loaded={always_loaded}")
+            logger.debug(f"      - {m['name']}: QPM={m.get('qpm', 0):.2f} (QPS={m['qps']:.2f}), idle={m['idle_seconds']:.1f}s, GPU={m['gpu']}, since_load={m.get('time_since_load_seconds', 0):.1f}s")
+        logger.debug(f"   GPU memory pressure: {gpu_memory_pressure}")
+        logger.debug(f"   Policies: evict_after_idle={idle_threshold}s, always_loaded={always_loaded}")
         
         # Ask brain for decisions (MANDATORY - no fallback)
         try:

@@ -242,18 +242,18 @@ class ModeliumMetrics:
         if is_new_window:
             self._last_qps_update[model_key] = now
             self._last_qpm_update[model_key] = now
-            self.logger.info(f"📊 QPS: Initialized window for {model_key} at {now}")
+            self.logger.debug(f"📊 QPS: Initialized window for {model_key} at {now}")
         
         # Update QPS gauge periodically (every 1+ seconds) but DON'T reset counter
         # Counter accumulates for 10-second window, then resets
         last_update = self._last_qps_update.get(model_key, now)
         elapsed_since_update = now - last_update
         
-        # Log request recording
-        self.logger.info(f"📊 QPS: Recorded request for {model_key}: count={self._model_request_counts[model_key]} (was {old_count}), elapsed={elapsed_since_update:.2f}s, gpu={gpu}")
+        # Log request recording (only at DEBUG to reduce verbosity)
+        self.logger.debug(f"📊 QPS: Recorded request for {model_key}: count={self._model_request_counts[model_key]} (was {old_count}), elapsed={elapsed_since_update:.2f}s, gpu={gpu}")
         
         if elapsed_since_update >= 1.0:
-            self.logger.info(f"📊 QPS: Updating gauge for {model_key} (elapsed={elapsed_since_update:.2f}s >= 1.0s)")
+            self.logger.debug(f"📊 QPS: Updating gauge for {model_key} (elapsed={elapsed_since_update:.2f}s >= 1.0s)")
             self._update_model_qps(model, runtime, gpu)
         else:
             self.logger.debug(f"📊 QPS: Skipping gauge update for {model_key} (elapsed={elapsed_since_update:.2f}s < 1.0s)")
@@ -280,9 +280,9 @@ class ModeliumMetrics:
             # Calculate QPS over the elapsed time
             qps = count / elapsed if elapsed > 0 else 0.0
             
-            # Log before updating gauge
+            # Update Prometheus gauge (only log at DEBUG level to reduce verbosity)
             gpu_label = str(gpu) if gpu is not None else "unknown"
-            self.logger.info(f"📊 QPS: Updating gauge for {model_key}: count={count}, elapsed={elapsed:.2f}s, qps={qps:.2f}, gpu={gpu_label}")
+            self.logger.debug(f"📊 QPS: Updating gauge for {model_key}: count={count}, elapsed={elapsed:.2f}s, qps={qps:.2f}, gpu={gpu_label}")
             
             # Update Prometheus gauge
             self.model_qps.labels(
@@ -291,22 +291,22 @@ class ModeliumMetrics:
                 gpu=gpu_label
             ).set(qps)
             
-            # Verify gauge was updated
+            # Only log errors, not successful updates
             try:
                 verify_value = self.model_qps.labels(
                     model=model,
                     runtime=runtime,
                     gpu=gpu_label
                 )._value.get()
-                self.logger.info(f"📊 QPS: Gauge updated successfully for {model_key}: {verify_value:.2f}")
+                self.logger.debug(f"📊 QPS: Gauge updated for {model_key}: {verify_value:.2f}")
             except Exception as e:
                 self.logger.error(f"📊 QPS: Failed to verify gauge update for {model_key}: {e}")
             
             # Only reset counter and update timestamp if window expired (10 seconds)
             # This allows get_model_qps() to see recent requests in the current window
             if elapsed >= 10.0:
-                # Window expired - reset for next window
-                self.logger.info(f"📊 QPS: Window expired for {model_key} (elapsed={elapsed:.2f}s >= 10.0s), resetting counter")
+                # Window expired - reset for next window (only log at DEBUG)
+                self.logger.debug(f"📊 QPS: Window expired for {model_key} (elapsed={elapsed:.2f}s >= 10.0s), resetting counter")
                 self._model_request_counts[model_key] = 0
                 self._last_qps_update[model_key] = now
             # If window not expired, DON'T update _last_qps_update
