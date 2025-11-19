@@ -112,12 +112,17 @@ class ModeliumMetrics:
         self._model_request_counts: Dict[str, int] = {}
         self._model_last_request: Dict[str, float] = {}
         self._last_qps_update: Dict[str, float] = {}
+        self._model_gpu_map: Dict[str, Optional[int]] = {}  # Track GPU for each model
+        
+        # Background thread to decay QPS when no requests
+        self._qps_decay_thread = None
+        self._stop_decay_thread = threading.Event()
         
         self.logger.info("Prometheus metrics initialized")
     
     def start_server(self, port: int = 9090):
         """
-        Start Prometheus metrics HTTP server.
+        Start Prometheus metrics HTTP server and QPS decay thread.
         
         Args:
             port: Port to expose metrics on (default: 9090)
@@ -128,6 +133,56 @@ class ModeliumMetrics:
             self.logger.info(f"   Metrics: http://localhost:{port}/metrics")
         except Exception as e:
             self.logger.error(f"Failed to start Prometheus server: {e}")
+        
+        # Start background thread to decay QPS when no requests
+        self._stop_decay_thread.clear()
+        self._qps_decay_thread = threading.Thread(target=self._qps_decay_loop, daemon=True)
+        self._qps_decay_thread.start()
+        self.logger.info("📊 QPS decay thread started (updates QPS even when no requests)")
+    
+    def stop(self):
+        """Stop the QPS decay thread."""
+        if self._qps_decay_thread:
+            self._stop_decay_thread.set()
+            self._qps_decay_thread.join(timeout=5)
+            self.logger.info("📊 QPS decay thread stopped")
+    
+    def _qps_decay_loop(self):
+        """
+        Background thread that periodically updates QPS gauges even when no requests come in.
+        
+        This ensures QPS decays correctly when requests stop, instead of staying at the last value.
+        Updates every 2 seconds to keep QPS current.
+        """
+        while not self._stop_decay_thread.is_set():
+            try:
+                time.sleep(2.0)  # Update every 2 seconds
+                
+                # Update QPS for all models that have been tracked
+                now = time.time()
+                models_to_update = list(self._model_request_counts.keys())
+                
+                for model_key in models_to_update:
+                    # Parse model_key: "model:runtime"
+                    parts = model_key.split(":", 1)
+                    if len(parts) != 2:
+                        continue
+                    model, runtime = parts
+                    
+                    # Get GPU for this model
+                    gpu = self._model_gpu_map.get(model_key)
+                    
+                    # Check if we should update (elapsed >= 1.0s since last update)
+                    last_update = self._last_qps_update.get(model_key, now)
+                    elapsed = now - last_update
+                    
+                    if elapsed >= 1.0:
+                        # Update QPS even if no new requests (decay)
+                        self._update_model_qps(model, runtime, gpu)
+                        
+            except Exception as e:
+                self.logger.error(f"Error in QPS decay loop: {e}")
+                time.sleep(5)  # Wait longer on error
     
     def record_request(
         self,
