@@ -325,8 +325,12 @@ class ModeliumMetrics:
         # This is the most accurate value, updated every 1+ seconds
         gauge_value = None
         gauge_labels_tried = []
+        best_gauge_value = None
+        best_gpu_label = None
         
         # Try multiple GPU label values (unknown, actual GPU ID if available)
+        # IMPORTANT: Try all labels and pick the one with highest value (most recent)
+        # Don't return early on first match, as "unknown" might be 0.0 while actual GPU has value
         for gpu_label in ["unknown", "0", "1", "2", "3"]:
             try:
                 gauge_value = self.model_qps.labels(
@@ -335,15 +339,22 @@ class ModeliumMetrics:
                     gpu=gpu_label
                 )._value.get()
                 
-                gauge_labels_tried.append(f"{gpu_label}:{gpu_label}")
-                
                 if gauge_value is not None and gauge_value >= 0:
-                    # Gauge value is available and valid
-                    self.logger.info(f"📊 QPS: Read from Prometheus gauge for {model_key} (gpu={gpu_label}): {gauge_value:.2f}")
-                    return float(gauge_value)
+                    gauge_labels_tried.append(f"{gpu_label}:{gauge_value:.2f}")
+                    # Track the best (highest) value - this is likely the actual GPU label used
+                    if best_gauge_value is None or gauge_value > best_gauge_value:
+                        best_gauge_value = gauge_value
+                        best_gpu_label = gpu_label
+                else:
+                    gauge_labels_tried.append(f"{gpu_label}:None/Invalid")
             except Exception as e:
                 gauge_labels_tried.append(f"{gpu_label}:ERROR({str(e)[:50]})")
                 continue
+        
+        # Return the best gauge value found (highest, likely the actual GPU)
+        if best_gauge_value is not None and best_gauge_value > 0:
+            self.logger.info(f"📊 QPS: Read from Prometheus gauge for {model_key} (gpu={best_gpu_label}): {best_gauge_value:.2f} (tried: {gauge_labels_tried})")
+            return float(best_gauge_value)
         
         # Gauge read failed for all labels - log and fall back to counter
         self.logger.warning(f"📊 QPS: Could not read gauge for {model_key}, tried labels: {gauge_labels_tried}, falling back to counter")
